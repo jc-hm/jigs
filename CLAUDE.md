@@ -17,7 +17,7 @@ AI-powered template filling SaaS. First vertical: radiology reports.
 |---|---|
 | API | Hono on Lambda Function URL (streaming) |
 | Frontend | React + Vite SPA on S3/CloudFront |
-| DB | DynamoDB single-table (eu-central-1) |
+| DB | DynamoDB single-table (staging: us-west-2, prod: eu-central-1) |
 | Templates | S3 with org-isolated prefixes |
 | Auth | Cognito (Google + email/password) |
 | AI | Bedrock — Haiku (routing/classification) + Sonnet (filling) |
@@ -37,13 +37,18 @@ Session boundaries detected automatically by Haiku. Session state held client-si
 ```bash
 docker compose up                    # DynamoDB Local + MinIO
 pnpm --filter api run seed           # Seed local DB
-pnpm --filter api dev                # API at :3000
+pnpm --filter api dev                # API at :3000 (mock AI)
+pnpm --filter api dev:ollama         # API at :3000 (local Ollama AI)
 pnpm --filter web dev                # Web at :5173 (proxies to :3000)
 pnpm -r typecheck                    # Type-check all workspaces
 pnpm --filter api build              # Bundle Lambda for deploy
 pnpm --filter web build              # Build SPA
-cdk deploy --context stage=staging   # Deploy staging
-cdk deploy --context stage=prod      # Deploy production
+pnpm test                            # Unit tests (no Docker)
+pnpm test:integration                # Integration tests (needs Docker)
+pnpm test:staging                    # Smoke tests against staging (needs TARGET_URL, AUTH_TOKEN)
+pnpm test:prod                       # Smoke tests against prod
+cdk deploy --context stage=staging   # Deploy staging (us-west-2)
+cdk deploy --context stage=prod      # Deploy production (eu-central-1)
 ```
 
 ## Conventions
@@ -52,7 +57,11 @@ cdk deploy --context stage=prod      # Deploy production
 - S3 template keys always derived from authenticated orgId (from JWT), never from user input
 - Usage tracked via atomic counter increments (DynamoDB `ADD`), not per-record writes
 - Local dev uses `STAGE=local` env var to switch DynamoDB/S3 endpoints and skip auth
-- CDK stages: `staging` and `prod` — completely separate resources per stage
+- CDK stages: `staging` (us-west-2) and `prod` (eu-central-1) — completely separate resources per stage
+- AI services accessed via provider pattern (`api/src/services/ai/provider.ts`):
+  - `AI_PROVIDER=mock` (default local) — canned responses, for tests and basic frontend work
+  - `AI_PROVIDER=ollama` — local Ollama (install: `brew install ollama`, pull: `ollama pull llama3.1:8b`)
+  - `AI_PROVIDER=bedrock` — real AWS Bedrock (local needs AWS credentials, deployed mode always uses this)
 
 ## CLAUDE.md Documentation System
 

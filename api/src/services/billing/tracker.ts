@@ -19,9 +19,11 @@ export function calculateCost(
   );
 }
 
+const FREE_DAILY_LIMIT = 10;
+
 export async function checkFreeLimit(userId: string): Promise<boolean> {
   const dailyCount = await getDailyUsage(userId);
-  return dailyCount < 1;
+  return dailyCount < FREE_DAILY_LIMIT;
 }
 
 export async function recordUsage(

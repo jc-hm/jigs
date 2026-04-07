@@ -7,7 +7,7 @@ AWS CDK (TypeScript) managing all cloud resources. Single stack deployed per sta
 - **CDK over Terraform/SST** — TypeScript (same as app), AWS-native, no YAML/HCL. First-party AWS support.
 - **Single stack** — `JigsStack` contains all resources. Split into multiple stacks only when deploy times become an issue.
 - **Stage-based isolation** — `--context stage=staging|prod` creates completely separate resources. Resource names include the stage suffix.
-- **Region: eu-central-1** — Frankfurt, closest to first market (Spain). Bedrock supported.
+- **Region per stage** — staging deploys to `us-west-2` (Oregon, near dev in Seattle), prod deploys to `eu-central-1` (Frankfurt, near first market Spain). Region mapped from stage name in `bin/jigs.ts`.
 
 ## Resources Created
 

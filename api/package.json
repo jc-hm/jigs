@@ -5,23 +5,30 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/local.ts",
+    "dev:ollama": "AI_PROVIDER=ollama tsx watch src/local.ts",
     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --outdir=dist --format=esm --external:@aws-sdk/*",
     "typecheck": "tsc --noEmit",
-    "seed": "tsx src/db/seed.ts"
+    "seed": "tsx src/db/seed.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:staging": "vitest run --config vitest.smoke.config.ts",
+    "test:prod": "vitest run --config vitest.smoke.config.ts"
   },
   "dependencies": {
-    "hono": "^4.7.0",
-    "@hono/node-server": "^1.14.0",
-    "@aws-sdk/client-dynamodb": "^3.750.0",
-    "@aws-sdk/lib-dynamodb": "^3.750.0",
-    "@aws-sdk/client-s3": "^3.750.0",
     "@aws-sdk/client-bedrock-runtime": "^3.750.0",
-    "aws-jwt-verify": "^4.0.0"
+    "@aws-sdk/client-dynamodb": "^3.750.0",
+    "@aws-sdk/client-s3": "^3.750.0",
+    "@aws-sdk/lib-dynamodb": "^3.750.0",
+    "@hono/node-server": "^1.14.0",
+    "aws-jwt-verify": "^4.0.0",
+    "hono": "^4.7.0"
   },
   "devDependencies": {
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.25.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
-    "esbuild": "^0.25.0",
-    "@types/node": "^22.0.0"
+    "vitest": "^4.1.2"
   }
 }

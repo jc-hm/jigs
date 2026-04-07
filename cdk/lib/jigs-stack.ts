@@ -6,6 +6,7 @@ import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as cloudfront from "aws-cdk-lib/aws-cloudfront";
 import * as origins from "aws-cdk-lib/aws-cloudfront-origins";
 import * as iam from "aws-cdk-lib/aws-iam";
+import * as s3deploy from "aws-cdk-lib/aws-s3-deployment";
 import { Construct } from "constructs";
 
 interface JigsStackProps extends cdk.StackProps {
@@ -187,6 +188,14 @@ export class JigsStack extends cdk.Stack {
           responsePagePath: "/index.html",
         },
       ],
+    });
+
+    // --- Deploy SPA to web bucket ---
+    new s3deploy.BucketDeployment(this, "WebDeploy", {
+      sources: [s3deploy.Source.asset("../web/dist")],
+      destinationBucket: webBucket,
+      distribution,
+      distributionPaths: ["/*"],
     });
 
     // --- Outputs ---

@@ -11,6 +11,8 @@ type SpeechRecognitionInstance = any;
 export function VoiceInput({ onTranscript, disabled }: VoiceInputProps) {
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<SpeechRecognitionInstance>(null);
+  const onTranscriptRef = useRef(onTranscript);
+  onTranscriptRef.current = onTranscript;
 
   useEffect(() => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -26,7 +28,7 @@ export function VoiceInput({ onTranscript, disabled }: VoiceInputProps) {
       for (let i = 0; i < event.results.length; i++) {
         transcript += event.results[i][0].transcript;
       }
-      onTranscript(transcript);
+      onTranscriptRef.current(transcript);
     };
 
     recognition.onerror = () => setIsListening(false);
@@ -37,7 +39,7 @@ export function VoiceInput({ onTranscript, disabled }: VoiceInputProps) {
     return () => {
       recognition.stop();
     };
-  }, [onTranscript]);
+  }, []);
 
   const toggle = useCallback(() => {
     if (!recognitionRef.current) return;

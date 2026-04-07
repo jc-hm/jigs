@@ -5,7 +5,11 @@
     "dev": "pnpm --filter api dev & pnpm --filter web dev",
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm --filter api test",
+    "test:integration": "pnpm --filter api test:integration",
+    "test:staging": "pnpm --filter api test:staging",
+    "test:prod": "pnpm --filter api test:prod"
   },
   "engines": {
     "node": ">=20"

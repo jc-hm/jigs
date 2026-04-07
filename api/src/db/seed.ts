@@ -2,12 +2,34 @@ import {
   CreateTableCommand,
   DynamoDBClient,
 } from "@aws-sdk/client-dynamodb";
+import {
+  CreateBucketCommand,
+  PutObjectCommand,
+  S3Client,
+} from "@aws-sdk/client-s3";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import { putOrg, putUser, putSkill } from "./entities.js";
 
 const client = new DynamoDBClient({
   endpoint: "http://localhost:8000",
   region: "local",
+  credentials: { accessKeyId: "local", secretAccessKey: "local" },
 });
+
+const s3 = new S3Client({
+  endpoint: "http://localhost:9000",
+  region: "local",
+  forcePathStyle: true,
+  credentials: {
+    accessKeyId: "minioadmin",
+    secretAccessKey: "minioadmin",
+  },
+});
+
+const BUCKET = "jigs-templates-local";
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 async function createTable() {
   try {
@@ -47,7 +69,7 @@ async function createTable() {
   }
 }
 
-async function seed() {
+export async function seed() {
   await createTable();
 
   await putOrg({
@@ -100,7 +122,39 @@ async function seed() {
     ],
   });
 
-  console.log("Seed data inserted");
+  // Create S3 bucket and upload templates
+  try {
+    await s3.send(new CreateBucketCommand({ Bucket: BUCKET }));
+    console.log("S3 bucket created");
+  } catch (e: unknown) {
+    if (e instanceof Error && e.name === "BucketAlreadyOwnedByYou") {
+      console.log("S3 bucket already exists");
+    } else {
+      throw e;
+    }
+  }
+
+  const templatesDir = join(__dirname, "../../seed-templates");
+  const templateFiles = [
+    { file: "mri-knee.md", key: "test-org/templates/mri-knee.md" },
+    { file: "ct-chest.md", key: "test-org/templates/ct-chest.md" },
+    { file: "xray-lumbar.md", key: "test-org/templates/xray-lumbar.md" },
+  ];
+
+  for (const t of templateFiles) {
+    const content = readFileSync(join(templatesDir, t.file), "utf-8");
+    await s3.send(
+      new PutObjectCommand({
+        Bucket: BUCKET,
+        Key: t.key,
+        Body: content,
+        ContentType: "text/markdown",
+      })
+    );
+    console.log(`Uploaded ${t.key}`);
+  }
+
+  console.log("Seed complete");
 }
 
 seed().catch(console.error);
