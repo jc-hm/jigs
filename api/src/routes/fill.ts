@@ -1,8 +1,7 @@
 import { Hono } from "hono";
 import { stream } from "hono/streaming";
-import { getSkill } from "../db/entities.js";
 import { getAIRouter, getAIFiller } from "../services/ai/provider.js";
-import { getTemplateContent } from "../services/templates/lookup.js";
+import { lsRecursive, cat, findAuthor } from "../services/files/operations.js";
 import { checkFreeLimit, recordUsage } from "../services/billing/tracker.js";
 import { config } from "../env.js";
 import type { AppEnv } from "../types.js";
@@ -13,17 +12,10 @@ fill.post("/", async (c) => {
   const user = c.get("user");
 
   const body = await c.req.json<{
-    skillId: string;
     message: string;
     sessionContext?: string;
     conversationHistory?: Array<{ role: "user" | "assistant"; text: string }>;
   }>();
-
-  // Load skill (validate before checking quota)
-  const skill = await getSkill(user.orgId, body.skillId);
-  if (!skill) {
-    return c.json({ error: "Skill not found" }, 404);
-  }
 
   // Check free tier (skipped in local dev)
   if (!config.isLocal) {
@@ -36,13 +28,23 @@ fill.post("/", async (c) => {
     }
   }
 
+  // List all template files (excluding AUTHOR.md and folders)
+  const allFiles = await lsRecursive(user.userId);
+  const templateFiles = allFiles.filter(
+    (f) => f !== "AUTHOR.md" && !f.endsWith("/AUTHOR.md") && !f.endsWith("/")
+  );
+
+  if (templateFiles.length === 0) {
+    return c.json({ error: "No templates found. Add templates first." }, 400);
+  }
+
   // Resolve AI services
   const aiRouter = await getAIRouter();
   const aiFiller = await getAIFiller();
 
   // Route intent
   const route = await aiRouter.classifyIntent(
-    skill.taxonomy,
+    templateFiles,
     body.message,
     body.sessionContext
   );
@@ -52,27 +54,24 @@ fill.post("/", async (c) => {
       return c.json({ error: "Could not match a template" }, 400);
     }
 
-    const templateEntry = skill.taxonomy.find(
-      (t) => t.id === route.templateId
-    );
-    if (!templateEntry) {
-      return c.json({ error: "Template not found in taxonomy" }, 404);
+    // Verify the template exists in our file list
+    if (!templateFiles.includes(route.templateId)) {
+      return c.json({ error: "Matched template not found" }, 404);
     }
 
-    const templateContent = await getTemplateContent(
-      user.orgId,
-      user.userId,
-      templateEntry.s3Key
-    );
+    // Load template content + nearest AUTHOR.md in parallel
+    const [templateContent, authorContent] = await Promise.all([
+      cat(user.userId, route.templateId),
+      findAuthor(user.userId, route.templateId),
+    ]);
 
     return stream(c, async (s) => {
       await s.write(
-        `data: ${JSON.stringify({ type: "meta", intent: route.intent, templateId: route.templateId, templateName: templateEntry.name })}\n\n`
+        `data: ${JSON.stringify({ type: "meta", intent: route.intent, templatePath: route.templateId })}\n\n`
       );
 
       for await (const chunk of aiFiller.streamFillTemplate(
-        skill.instructions,
-        skill.tone,
+        authorContent || "",
         templateContent,
         body.message,
         body.conversationHistory
@@ -102,28 +101,24 @@ fill.post("/", async (c) => {
       return c.json({ error: "No active session to refine" }, 400);
     }
 
-    const lastTemplateId = body.sessionContext;
-    const templateEntry = skill.taxonomy.find(
-      (t) => t.id === lastTemplateId
-    );
-    if (!templateEntry) {
+    const lastTemplatePath = body.sessionContext;
+    if (!lastTemplatePath || !templateFiles.includes(lastTemplatePath)) {
       return c.json({ error: "Session template not found" }, 404);
     }
 
-    const templateContent = await getTemplateContent(
-      user.orgId,
-      user.userId,
-      templateEntry.s3Key
-    );
+    // Load template content + nearest AUTHOR.md in parallel
+    const [templateContent, authorContent] = await Promise.all([
+      cat(user.userId, lastTemplatePath),
+      findAuthor(user.userId, lastTemplatePath),
+    ]);
 
     return stream(c, async (s) => {
       await s.write(
-        `data: ${JSON.stringify({ type: "meta", intent: "REFINE", templateId: lastTemplateId })}\n\n`
+        `data: ${JSON.stringify({ type: "meta", intent: "REFINE", templatePath: lastTemplatePath })}\n\n`
       );
 
       for await (const chunk of aiFiller.streamFillTemplate(
-        skill.instructions,
-        skill.tone,
+        authorContent || "",
         templateContent,
         body.message,
         body.conversationHistory

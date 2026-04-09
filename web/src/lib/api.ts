@@ -1,15 +1,23 @@
+import { getIdToken } from "./auth";
+
 const API_BASE = "/api/v1";
+
+async function authHeaders(): Promise<Record<string, string>> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  const token = await getIdToken();
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  return headers;
+}
 
 export async function apiFetch<T>(
   path: string,
   options?: RequestInit
 ): Promise<T> {
+  const headers = await authHeaders();
   const res = await fetch(`${API_BASE}${path}`, {
-    headers: {
-      "Content-Type": "application/json",
-      // TODO: Add Cognito JWT token
-      // "Authorization": `Bearer ${getToken()}`,
-    },
+    headers,
     ...options,
   });
   if (!res.ok) {
@@ -19,26 +27,25 @@ export async function apiFetch<T>(
   return res.json();
 }
 
+// --- Stream events (fill endpoint) ---
+
 export interface StreamEvent {
   type: "meta" | "text" | "done";
   text?: string;
   intent?: string;
-  templateId?: string;
-  templateName?: string;
+  templatePath?: string;
   usage?: { inputTokens: number; outputTokens: number; modelId: string };
 }
 
 export async function* streamFill(body: {
-  skillId: string;
   message: string;
   sessionContext?: string;
   conversationHistory?: Array<{ role: "user" | "assistant"; text: string }>;
 }): AsyncGenerator<StreamEvent> {
+  const headers = await authHeaders();
   const res = await fetch(`${API_BASE}/fill`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers,
     body: JSON.stringify(body),
   });
 
@@ -72,4 +79,81 @@ export async function* streamFill(body: {
       }
     }
   }
+}
+
+// --- File operations (templates endpoint) ---
+
+export interface FileEntry {
+  path: string;
+  isDirectory: boolean;
+}
+
+export interface AgentResult {
+  actions: Array<{ tool: string; path?: string; summary: string }>;
+  message: string;
+  changedPaths: string[];
+}
+
+export async function fileLs(path?: string): Promise<FileEntry[]> {
+  const query = path ? `?path=${encodeURIComponent(path)}` : "";
+  return apiFetch<FileEntry[]>(`/templates/ls${query}`);
+}
+
+export async function fileCat(
+  path: string
+): Promise<{ path: string; content: string }> {
+  return apiFetch(`/templates/cat?path=${encodeURIComponent(path)}`);
+}
+
+export async function fileWrite(
+  path: string,
+  content: string
+): Promise<void> {
+  await apiFetch("/templates/write", {
+    method: "PUT",
+    body: JSON.stringify({ path, content }),
+  });
+}
+
+export async function fileRm(path: string): Promise<void> {
+  await apiFetch("/templates/rm", {
+    method: "POST",
+    body: JSON.stringify({ path }),
+  });
+}
+
+/** Recursively delete a folder and all its contents. */
+export async function fileRmDir(path: string): Promise<void> {
+  const entries = await fileLs(path);
+  for (const entry of entries) {
+    const fullPath = path ? `${path}/${entry.path}` : entry.path;
+    if (entry.isDirectory) {
+      await fileRmDir(fullPath);
+    } else {
+      await fileRm(fullPath);
+    }
+  }
+  // Delete the folder marker itself
+  await fileRm(path + "/");
+}
+
+export async function fileMv(from: string, to: string): Promise<void> {
+  await apiFetch("/templates/mv", {
+    method: "POST",
+    body: JSON.stringify({ from, to }),
+  });
+}
+
+export async function fileMkdir(path: string): Promise<void> {
+  await apiFetch("/templates/mkdir", {
+    method: "POST",
+    body: JSON.stringify({ path }),
+  });
+}
+
+export async function runAgent(message: string): Promise<AgentResult> {
+  return apiFetch<AgentResult>("/templates/agent", {
+    method: "POST",
+    body: JSON.stringify({ message }),
+  });
 }

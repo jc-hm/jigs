@@ -9,19 +9,16 @@ const bedrock = new BedrockRuntimeClient(
   config.isLocal ? { region: "us-west-2" } : {}
 );
 
-const MODEL_ID = "anthropic.claude-sonnet-4-20250514";
+const MODEL_ID = "us.anthropic.claude-sonnet-4-20250514-v1:0";
 
 export const bedrockFiller: AIFiller = {
   async *streamFillTemplate(
-    skillInstructions: string,
-    skillTone: string,
+    authorInstructions: string,
     templateContent: string,
     userDescription: string,
     conversationHistory?: Array<{ role: "user" | "assistant"; text: string }>,
   ): AsyncGenerator<FillChunk> {
-    const systemPrompt = `${skillInstructions}
-
-Tone: ${skillTone}
+    const systemPrompt = `${authorInstructions}
 
 Template:
 ${templateContent}

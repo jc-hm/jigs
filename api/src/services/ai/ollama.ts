@@ -1,16 +1,9 @@
-import type { AIRouter, AIFiller, FillChunk, RouterResult } from "./types.js";
-import type { TemplateTaxonomyEntry } from "../../db/entities.js";
+import type { AIRouter, AIFiller, AIAgent, FillChunk, RouterResult } from "./types.js";
+import type { AgentResult } from "../files/types.js";
 import { buildRouterPrompt } from "./router.js";
 import { config } from "../../env.js";
 
 const OLLAMA_API = `${config.ollamaUrl}/api/chat`;
-
-interface OllamaChatRequest {
-  model: string;
-  messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
-  stream: boolean;
-  options?: { temperature?: number; num_predict?: number };
-}
 
 interface OllamaStreamChunk {
   message?: { content: string };
@@ -20,12 +13,18 @@ interface OllamaStreamChunk {
 }
 
 async function ollamaChat(
-  request: OllamaChatRequest
+  request: {
+    model: string;
+    messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
+    stream: boolean;
+    options?: { temperature?: number; num_predict?: number };
+  }
 ): Promise<string> {
   const res = await fetch(OLLAMA_API, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ...request, stream: false }),
+    signal: AbortSignal.timeout(600_000), // 10 min for slow local models
   });
   if (!res.ok) {
     throw new Error(`Ollama error ${res.status}: ${await res.text()}`);
@@ -36,11 +35,11 @@ async function ollamaChat(
 
 export const ollamaRouter: AIRouter = {
   async classifyIntent(
-    taxonomy: TemplateTaxonomyEntry[],
+    filenames: string[],
     userMessage: string,
     sessionContext?: string,
   ): Promise<RouterResult> {
-    const systemPrompt = buildRouterPrompt(taxonomy, sessionContext);
+    const systemPrompt = buildRouterPrompt(filenames, sessionContext);
 
     const text = await ollamaChat({
       model: config.ollamaModel,
@@ -55,33 +54,69 @@ export const ollamaRouter: AIRouter = {
     // Extract JSON from response (model may wrap it in markdown)
     const jsonMatch = text.match(/\{[^}]+\}/);
     if (!jsonMatch) {
-      return { intent: "NEW_FILL", templateId: taxonomy[0]?.id };
+      return { intent: "NEW_FILL", templateId: filenames[0] };
     }
 
     try {
       const parsed = JSON.parse(jsonMatch[0]);
       return {
         intent: parsed.intent || "NEW_FILL",
-        templateId: parsed.templateId || taxonomy[0]?.id,
+        templateId: parsed.templateId || filenames[0],
         message: parsed.message,
       };
     } catch {
-      return { intent: "NEW_FILL", templateId: taxonomy[0]?.id };
+      return { intent: "NEW_FILL", templateId: filenames[0] };
+    }
+  },
+};
+
+export const ollamaAgent: AIAgent = {
+  async executeFileOperations(
+    _userId: string,
+    message: string,
+    existingFiles: string[],
+  ): Promise<AgentResult> {
+    // Simplified single-turn: ask Ollama what to do, parse response
+    const systemPrompt = `You are a template file manager. Current files:\n${existingFiles.map(f => `- ${f}`).join("\n")}
+
+Respond with JSON: { "actions": [{"tool": "write_file", "path": "...", "content": "..."}], "message": "what you did" }`;
+
+    const text = await ollamaChat({
+      model: config.ollamaModel,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: message },
+      ],
+      stream: false,
+      options: { temperature: 0, num_predict: 16384 },
+    });
+
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      return { actions: [], message: "Could not process request", changedPaths: [] };
+    }
+
+    try {
+      const parsed = JSON.parse(jsonMatch[0]);
+      return {
+        actions: parsed.actions || [],
+        message: parsed.message || "Done",
+        changedPaths: (parsed.actions || []).map((a: { path?: string }) => a.path).filter(Boolean),
+      };
+    } catch {
+      return { actions: [], message: "Could not parse response", changedPaths: [] };
     }
   },
 };
 
 export const ollamaFiller: AIFiller = {
   async *streamFillTemplate(
-    skillInstructions: string,
-    skillTone: string,
+    authorInstructions: string,
     templateContent: string,
     userDescription: string,
     conversationHistory?: Array<{ role: "user" | "assistant"; text: string }>,
   ): AsyncGenerator<FillChunk> {
-    const systemPrompt = `${skillInstructions}
-
-Tone: ${skillTone}
+    const systemPrompt = `${authorInstructions}
 
 Template:
 ${templateContent}

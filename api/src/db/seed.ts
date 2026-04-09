@@ -10,7 +10,7 @@ import {
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { putOrg, putUser, putSkill } from "./entities.js";
+import { putOrg, putUser } from "./entities.js";
 
 const client = new DynamoDBClient({
   endpoint: "http://localhost:8000",
@@ -87,41 +87,6 @@ export async function seed() {
     cognitoId: "test-cognito-id",
   });
 
-  await putSkill({
-    id: "radiology",
-    orgId: "test-org",
-    name: "Radiology Report Generator",
-    tone: "Professional medical reporting, concise, structured",
-    instructions:
-      "You are a radiology report generator. Fill the template using the clinical information provided. For findings not mentioned by the user, use standard normal values. Output only the completed report, no explanations.",
-    taxonomy: [
-      {
-        id: "mri-knee",
-        name: "MRI Knee",
-        modality: "MRI",
-        bodyPart: "knee",
-        description: "Standard knee MRI including ACL, meniscus, cartilage, effusion evaluation",
-        s3Key: "templates/mri-knee.md",
-      },
-      {
-        id: "ct-chest",
-        name: "CT Chest",
-        modality: "CT",
-        bodyPart: "chest",
-        description: "Chest CT with or without contrast, lung parenchyma and mediastinum",
-        s3Key: "templates/ct-chest.md",
-      },
-      {
-        id: "xray-lumbar",
-        name: "X-Ray Lumbar Spine",
-        modality: "X-Ray",
-        bodyPart: "lumbar spine",
-        description: "AP and lateral views of the lumbar spine",
-        s3Key: "templates/xray-lumbar.md",
-      },
-    ],
-  });
-
   // Create S3 bucket and upload templates
   try {
     await s3.send(new CreateBucketCommand({ Bucket: BUCKET }));
@@ -135,10 +100,12 @@ export async function seed() {
   }
 
   const templatesDir = join(__dirname, "../../seed-templates");
+
+  // Upload templates keyed by userId (test-user/templates/)
   const templateFiles = [
-    { file: "mri-knee.md", key: "test-org/templates/mri-knee.md" },
-    { file: "ct-chest.md", key: "test-org/templates/ct-chest.md" },
-    { file: "xray-lumbar.md", key: "test-org/templates/xray-lumbar.md" },
+    { file: "mri-knee.md", key: "test-user/templates/mri-knee.md" },
+    { file: "ct-chest.md", key: "test-user/templates/ct-chest.md" },
+    { file: "xray-lumbar.md", key: "test-user/templates/xray-lumbar.md" },
   ];
 
   for (const t of templateFiles) {
@@ -148,11 +115,23 @@ export async function seed() {
         Bucket: BUCKET,
         Key: t.key,
         Body: content,
-        ContentType: "text/markdown",
+        ContentType: "text/plain",
       })
     );
     console.log(`Uploaded ${t.key}`);
   }
+
+  // Upload AUTHOR.md with fill instructions
+  const authorContent = readFileSync(join(templatesDir, "AUTHOR.md"), "utf-8");
+  await s3.send(
+    new PutObjectCommand({
+      Bucket: BUCKET,
+      Key: "test-user/templates/AUTHOR.md",
+      Body: authorContent,
+      ContentType: "text/plain",
+    })
+  );
+  console.log("Uploaded test-user/templates/AUTHOR.md");
 
   console.log("Seed complete");
 }

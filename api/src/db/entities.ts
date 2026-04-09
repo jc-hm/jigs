@@ -24,24 +24,6 @@ export interface User {
   cognitoId: string;
 }
 
-export interface TemplateTaxonomyEntry {
-  id: string;
-  name: string;
-  modality?: string;
-  bodyPart?: string;
-  description: string;
-  s3Key: string;
-}
-
-export interface Skill {
-  id: string;
-  orgId: string;
-  name: string;
-  tone: string;
-  instructions: string;
-  taxonomy: TemplateTaxonomyEntry[];
-}
-
 // --- Org ---
 
 export async function getOrg(orgId: string): Promise<Org | undefined> {
@@ -121,64 +103,30 @@ export async function putUser(user: User): Promise<void> {
   );
 }
 
-// --- Skill ---
+/** Auto-provision a new user + org on first sign-in. */
+export async function autoProvisionUser(
+  cognitoId: string,
+  email: string
+): Promise<User> {
+  const userId = crypto.randomUUID().slice(0, 12);
+  const orgId = crypto.randomUUID().slice(0, 12);
 
-export async function getSkill(
-  orgId: string,
-  skillId: string
-): Promise<Skill | undefined> {
-  const res = await db.send(
-    new GetCommand({
-      TableName: TABLE_NAME,
-      Key: { PK: `ORG#${orgId}`, SK: `SKILL#${skillId}` },
-    })
-  );
-  if (!res.Item) return undefined;
-  return {
-    id: skillId,
+  await putOrg({
+    id: orgId,
+    name: email.split("@")[0],
+    region: "us-west-2",
+    plan: "free",
+  });
+
+  const user: User = {
+    id: userId,
     orgId,
-    name: res.Item.name,
-    tone: res.Item.tone,
-    instructions: res.Item.instructions,
-    taxonomy: res.Item.taxonomy || [],
+    email,
+    role: "admin",
+    cognitoId,
   };
-}
-
-export async function putSkill(skill: Skill): Promise<void> {
-  await db.send(
-    new PutCommand({
-      TableName: TABLE_NAME,
-      Item: {
-        PK: `ORG#${skill.orgId}`,
-        SK: `SKILL#${skill.id}`,
-        name: skill.name,
-        tone: skill.tone,
-        instructions: skill.instructions,
-        taxonomy: skill.taxonomy,
-      },
-    })
-  );
-}
-
-export async function listSkills(orgId: string): Promise<Skill[]> {
-  const res = await db.send(
-    new QueryCommand({
-      TableName: TABLE_NAME,
-      KeyConditionExpression: "PK = :pk AND begins_with(SK, :sk)",
-      ExpressionAttributeValues: {
-        ":pk": `ORG#${orgId}`,
-        ":sk": "SKILL#",
-      },
-    })
-  );
-  return (res.Items || []).map((item) => ({
-    id: item.SK.replace("SKILL#", ""),
-    orgId,
-    name: item.name,
-    tone: item.tone,
-    instructions: item.instructions,
-    taxonomy: item.taxonomy || [],
-  }));
+  await putUser(user);
+  return user;
 }
 
 // --- Usage ---

@@ -1,99 +1,93 @@
 import { Hono } from "hono";
-import { getSkill, putSkill } from "../db/entities.js";
 import {
-  getTemplateContent,
-  putTemplateContent,
-  forkTemplate,
-} from "../services/templates/lookup.js";
-import { randomUUID } from "crypto";
+  ls,
+  lsRecursive,
+  cat,
+  write,
+  rm,
+  mv,
+  mkdir,
+} from "../services/files/operations.js";
+import { getAIAgent } from "../services/ai/provider.js";
 import type { AppEnv } from "../types.js";
 
 const templates = new Hono<AppEnv>();
 
-// Get template content
-templates.get("/:skillId/:templateId", async (c) => {
+// List directory contents
+templates.get("/ls", async (c) => {
   const user = c.get("user");
-  const skill = await getSkill(user.orgId, c.req.param("skillId"));
-  if (!skill) return c.json({ error: "Skill not found" }, 404);
-
-  const entry = skill.taxonomy.find(
-    (t) => t.id === c.req.param("templateId")
-  );
-  if (!entry) return c.json({ error: "Template not found" }, 404);
-
-  const content = await getTemplateContent(
-    user.orgId,
-    user.userId,
-    entry.s3Key
-  );
-  return c.json({ ...entry, content });
+  const path = c.req.query("path") || "";
+  const entries = await ls(user.userId, path);
+  return c.json(entries);
 });
 
-// Upload a template (admin only)
-templates.post("/:skillId", async (c) => {
+// Read file content
+templates.get("/cat", async (c) => {
   const user = c.get("user");
-  if (user.role !== "admin") {
-    return c.json({ error: "Admin only" }, 403);
+  const path = c.req.query("path");
+  if (!path) return c.json({ error: "path is required" }, 400);
+
+  try {
+    const content = await cat(user.userId, path);
+    return c.json({ path, content });
+  } catch {
+    return c.json({ error: "File not found" }, 404);
+  }
+});
+
+// Create or update a file
+templates.put("/write", async (c) => {
+  const user = c.get("user");
+  const body = await c.req.json<{ path: string; content: string }>();
+  if (!body.path?.trim()) return c.json({ error: "path is required" }, 400);
+  if (body.content === undefined) return c.json({ error: "content is required" }, 400);
+
+  await write(user.userId, body.path, body.content);
+  return c.json({ message: "ok", path: body.path });
+});
+
+// Delete a file
+templates.post("/rm", async (c) => {
+  const user = c.get("user");
+  const body = await c.req.json<{ path: string }>();
+  if (!body.path?.trim()) return c.json({ error: "path is required" }, 400);
+
+  await rm(user.userId, body.path);
+  return c.json({ message: "ok", path: body.path });
+});
+
+// Move/rename a file
+templates.post("/mv", async (c) => {
+  const user = c.get("user");
+  const body = await c.req.json<{ from: string; to: string }>();
+  if (!body.from?.trim() || !body.to?.trim()) {
+    return c.json({ error: "from and to are required" }, 400);
   }
 
-  const skill = await getSkill(user.orgId, c.req.param("skillId"));
-  if (!skill) return c.json({ error: "Skill not found" }, 404);
-
-  const body = await c.req.json<{
-    name: string;
-    description: string;
-    modality?: string;
-    bodyPart?: string;
-    content: string;
-  }>();
-
-  const templateId = randomUUID().slice(0, 8);
-  const s3Key = `templates/${templateId}.md`;
-
-  // Upload content to S3
-  await putTemplateContent(user.orgId, s3Key, body.content);
-
-  // Add to skill taxonomy
-  skill.taxonomy.push({
-    id: templateId,
-    name: body.name,
-    modality: body.modality,
-    bodyPart: body.bodyPart,
-    description: body.description,
-    s3Key,
-  });
-  await putSkill(skill);
-
-  return c.json({ id: templateId, s3Key }, 201);
+  await mv(user.userId, body.from, body.to);
+  return c.json({ message: "ok", from: body.from, to: body.to });
 });
 
-// Fork a template (user creates their own version)
-templates.post("/:skillId/:templateId/fork", async (c) => {
+// Create a folder
+templates.post("/mkdir", async (c) => {
   const user = c.get("user");
-  const skill = await getSkill(user.orgId, c.req.param("skillId"));
-  if (!skill) return c.json({ error: "Skill not found" }, 404);
+  const body = await c.req.json<{ path: string }>();
+  if (!body.path?.trim()) return c.json({ error: "path is required" }, 400);
 
-  const entry = skill.taxonomy.find(
-    (t) => t.id === c.req.param("templateId")
-  );
-  if (!entry) return c.json({ error: "Template not found" }, 404);
+  await mkdir(user.userId, body.path);
+  return c.json({ message: "ok", path: body.path });
+});
 
-  // Get original content, then save as user fork
-  const content = await getTemplateContent(
-    user.orgId,
-    user.userId,
-    entry.s3Key
-  );
+// AI agent: natural language file operations
+templates.post("/agent", async (c) => {
+  const user = c.get("user");
+  const body = await c.req.json<{ message: string }>();
+  if (!body.message?.trim()) return c.json({ error: "message is required" }, 400);
 
-  const body = await c.req.json<{ content?: string }>().catch((): { content?: string } => ({}));
-  await forkTemplate(
-    user.orgId,
-    user.userId,
-    entry.s3Key,
-    body.content || content
-  );
-
-  return c.json({ message: "Template forked", s3Key: entry.s3Key });
+  const allFiles = await lsRecursive(user.userId);
+  const agent = await getAIAgent();
+  const result = await agent.executeFileOperations(user.userId, body.message, allFiles);
+  return c.json(result);
 });
 
 export { templates };

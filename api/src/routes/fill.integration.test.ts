@@ -13,27 +13,11 @@ describe("POST /api/v1/fill", () => {
     resetMockAI();
   });
 
-  it("returns 404 for unknown skill", async () => {
-    const res = await app.request("/api/v1/fill", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        skillId: "nonexistent",
-        message: "test",
-      }),
-    });
-
-    expect(res.status).toBe(404);
-    const body = await res.json();
-    expect(body.error).toContain("Skill not found");
-  });
-
   it("streams a filled report as SSE events", async () => {
     const res = await app.request("/api/v1/fill", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        skillId: "radiology",
         message: "Normal knee MRI, no findings",
       }),
     });
@@ -49,7 +33,7 @@ describe("POST /api/v1/fill", () => {
     // First event: meta
     expect(events[0].type).toBe("meta");
     expect(events[0].intent).toBe("NEW_FILL");
-    expect(events[0].templateId).toBe("mri-knee");
+    expect(events[0].templatePath).toBeDefined();
 
     // Last event: done with usage
     const last = events[events.length - 1];
@@ -62,12 +46,10 @@ describe("POST /api/v1/fill", () => {
   });
 
   it("allows multiple fills in local mode (no free tier limit)", async () => {
-    // Local mode skips free tier enforcement, so this should succeed
     const res = await app.request("/api/v1/fill", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        skillId: "radiology",
         message: "Another knee MRI",
       }),
     });
@@ -80,9 +62,8 @@ describe("POST /api/v1/fill", () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        skillId: "radiology",
         message: "change the effusion to moderate",
-        sessionContext: "mri-knee",
+        sessionContext: "mri-knee.md",
         conversationHistory: [
           { role: "user", text: "Normal knee MRI" },
           { role: "assistant", text: "Report generated." },
@@ -107,9 +88,8 @@ describe("POST /api/v1/fill", () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        skillId: "radiology",
         message: "change the effusion to moderate",
-        sessionContext: "mri-knee",
+        sessionContext: "mri-knee.md",
       }),
     });
 

@@ -1,9 +1,9 @@
-import type { AIRouter, AIFiller, FillChunk, RouterResult } from "./types.js";
-import type { TemplateTaxonomyEntry } from "../../db/entities.js";
+import type { AIRouter, AIFiller, AIAgent, FillChunk, RouterResult } from "./types.js";
+import type { AgentResult } from "../files/types.js";
 
 export const mockRouter: AIRouter = {
   async classifyIntent(
-    taxonomy: TemplateTaxonomyEntry[],
+    filenames: string[],
     userMessage: string,
     _sessionContext?: string,
   ): Promise<RouterResult> {
@@ -12,14 +12,14 @@ export const mockRouter: AIRouter = {
       return { intent: "REFINE" };
     }
     if (lower.includes("re-select") || lower.includes("reselect") || lower.includes("different template")) {
-      return { intent: "RE_SELECT", templateId: taxonomy[0]?.id };
+      return { intent: "RE_SELECT", templateId: filenames[0] };
     }
     if (lower.includes("update template") || lower.includes("add section")) {
       return { intent: "UPDATE_TMPL" };
     }
     return {
       intent: "NEW_FILL",
-      templateId: taxonomy[0]?.id,
+      templateId: filenames[0],
     };
   },
 };
@@ -50,10 +50,26 @@ MRI of the left knee was performed without intravenous contrast using standard p
 ## Impression
 Normal MRI of the left knee. No acute abnormality.`;
 
+export const mockAgent: AIAgent = {
+  async executeFileOperations(
+    _userId: string,
+    message: string,
+    existingFiles: string[],
+  ): Promise<AgentResult> {
+    // Mock: create a new file based on message
+    return {
+      actions: [
+        { tool: "write_file", path: "mock-template", summary: `Created mock-template from: ${message.slice(0, 50)}` },
+      ],
+      message: `Processed your request. ${existingFiles.length} existing files found.`,
+      changedPaths: ["mock-template"],
+    };
+  },
+};
+
 export const mockFiller: AIFiller = {
   async *streamFillTemplate(
-    _skillInstructions: string,
-    _skillTone: string,
+    _authorInstructions: string,
     _templateContent: string,
     _userDescription: string,
     _conversationHistory?: Array<{ role: "user" | "assistant"; text: string }>,

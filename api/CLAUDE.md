@@ -1,6 +1,6 @@
 # API — Hono on Lambda
 
-Hono API serving both streaming (fill) and CRUD (skills, templates, billing) endpoints via a single Lambda Function URL.
+Hono API serving streaming (fill), file management (templates), agent, and billing endpoints via a single Lambda Function URL.
 
 ## Architecture Decisions
 
@@ -12,17 +12,20 @@ Hono API serving both streaming (fill) and CRUD (skills, templates, billing) end
 ## Key Patterns
 
 - **`src/types.ts`** — defines `AppEnv` with typed context variables. All route files must use `new Hono<AppEnv>()` to get typed `c.get("user")`.
-- **`src/middleware/auth.ts`** — in local mode (`STAGE=local`), returns a hardcoded test user. In deployed mode, validates Cognito JWT and looks up user from DynamoDB.
+- **`src/middleware/auth.ts`** — in local mode (`STAGE=local`), returns a hardcoded test user. In deployed mode, validates Cognito ID token (`tokenUse: "id"`) using `aws-jwt-verify` (JWKS cached). On first sign-in, auto-provisions a new Org + User in DynamoDB via `autoProvisionUser()`. The `/api/config` endpoint is public (before auth middleware) and returns Cognito pool/client IDs for the frontend. In local mode it returns `{ auth: null }` — this is the only signal the frontend uses to skip auth.
+- **Lambda ESM** — esbuild outputs `.mjs` extension so Lambda treats the bundle as ESM. This is required because `aws-jwt-verify` uses `import` for Node builtins (`crypto`, `https`). The CDK handler is `index.handler` which resolves to `index.mjs`.
 - **`src/db/entities.ts`** — ALL DynamoDB operations live here. Never use raw SDK calls in routes or services.
-- **AI provider pattern** — `src/services/ai/provider.ts` returns `AIRouter` and `AIFiller` implementations based on `AI_PROVIDER` env var:
+- **AI provider pattern** — `src/services/ai/provider.ts` returns `AIRouter`, `AIFiller`, and `AIAgent` implementations based on `AI_PROVIDER` env var:
   - `mock` (default local) — deterministic canned responses from `mock.ts`
   - `ollama` — local Ollama for interactive dev (`pnpm dev:ollama`). Implementation in `ollama.ts`.
-  - `bedrock` — real AWS Bedrock (always used in deployed mode). Implementation in `router.ts` + `filler.ts`.
-  Routes use `getAIRouter()` and `getAIFiller()`, never import implementations directly.
-- **`src/services/ai/types.ts`** — defines `AIRouter` and `AIFiller` interfaces, `Intent`, `FillChunk`, `FillResult` types.
-- **`src/services/ai/router.ts`** — Haiku intent classification (implements `AIRouter`). Also exports `buildRouterPrompt()` as a pure function for unit testing.
-- **`src/services/ai/filler.ts`** — Sonnet streaming fill (implements `AIFiller`). Returns an async generator yielding `{ type: "text" }` and `{ type: "usage" }` events.
+  - `bedrock` — real AWS Bedrock (always used in deployed mode). Router in `router.ts`, filler in `filler.ts`, agent in `agent.ts`.
+  Routes use `getAIRouter()`, `getAIFiller()`, and `getAIAgent()`, never import implementations directly.
+- **`src/services/ai/types.ts`** — defines `AIRouter`, `AIFiller`, and `AIAgent` interfaces, `Intent`, `FillChunk`, `FillResult` types.
+- **`src/services/ai/router.ts`** — Haiku intent classification. Takes `filenames: string[]` (not taxonomy). Exports `buildRouterPrompt()` for unit testing.
+- **`src/services/ai/filler.ts`** — Sonnet streaming fill. Takes `(authorInstructions, templateContent, userDescription, conversationHistory?)`.
+- **`src/services/ai/agent.ts`** — Sonnet multi-turn tool-use agent for file operations. Max 10 rounds. Tools: read_file, write_file, delete_file, move_file, list_files.
 - **`src/services/ai/mock.ts`** — Deterministic mock implementations for testing. Mock filler streams a canned report in chunks.
+- **File operations** — `src/services/files/operations.ts` provides S3 file operations (`ls`, `lsRecursive`, `cat`, `write`, `rm`, `mv`, `mkdir`, `findAuthor`) scoped to `{userId}/templates/` prefix. Used by both routes and the AI agent.
 - **Streaming responses** use Hono's `stream()` helper with SSE format (`data: {json}\n\n`).
 
 ## Adding a New Route
@@ -35,7 +38,7 @@ Hono API serving both streaming (fill) and CRUD (skills, templates, billing) end
 
 - `src/index.ts` — Lambda handler (`handle(app)`)
 - `src/local.ts` — Local dev server (port 3000)
-- `src/db/seed.ts` — Seeds local DynamoDB + MinIO with test org, user, radiology skill, and template files. Exports `seed()` for programmatic use in tests.
+- `src/db/seed.ts` — Seeds local DynamoDB + MinIO with test org, user, template files, and AUTHOR.md. Exports `seed()` for programmatic use in tests.
 
 ## Testing
 

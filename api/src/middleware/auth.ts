@@ -16,7 +16,7 @@ function getVerifier() {
   if (!verifier) {
     verifier = CognitoJwtVerifier.create({
       userPoolId: config.cognitoUserPoolId,
-      tokenUse: "access",
+      tokenUse: "id",
       clientId: config.cognitoClientId,
     });
   }
@@ -24,8 +24,9 @@ function getVerifier() {
 }
 
 export async function authMiddleware(c: Context, next: Next) {
-  // Local dev: skip auth, use test user
-  if (config.isLocal) {
+  // Local dev: skip auth only if STAGE is explicitly "local" AND no Cognito is configured.
+  // If a pool ID exists, always enforce auth — prevents misconfigured deploys from skipping.
+  if (config.isLocal && !config.cognitoUserPoolId) {
     c.set("user", {
       userId: "test-user",
       orgId: "test-org",
@@ -42,17 +43,30 @@ export async function authMiddleware(c: Context, next: Next) {
   const token = authHeader.slice(7);
   try {
     const payload = await getVerifier().verify(token);
+    const cognitoId = payload.sub;
+    const email = (payload as Record<string, unknown>).email as
+      | string
+      | undefined;
+
     // Look up user from DynamoDB by Cognito sub
-    const { getUserByCognitoId } = await import("../db/entities.js");
-    const user = await getUserByCognitoId(payload.sub);
+    const { getUserByCognitoId, autoProvisionUser } = await import(
+      "../db/entities.js"
+    );
+    let user = await getUserByCognitoId(cognitoId);
+
+    // Auto-provision on first sign-in
     if (!user) {
-      return c.json({ error: "User not found" }, 403);
+      if (!email) {
+        return c.json({ error: "Email not available in token" }, 403);
+      }
+      user = await autoProvisionUser(cognitoId, email);
     }
+
     c.set("user", {
       userId: user.id,
       orgId: user.orgId,
       role: user.role,
-      cognitoId: payload.sub,
+      cognitoId,
     } satisfies AuthUser);
     return next();
   } catch {

@@ -9,7 +9,7 @@ AI-powered template filling SaaS. First vertical: radiology reports.
 - **AWS-native serverless** — Lambda (Function URLs, streaming), DynamoDB, S3, Cognito, Bedrock, CloudFront
 - **Two providers only** — AWS + Stripe
 - **No report content stored** — avoids PHI liability. Only aggregated usage counters persisted.
-- **Skill + S3 model** — DynamoDB stores "skill" records (instructions, tone, taxonomy with S3 pointers). S3 stores template content as individual files per org prefix.
+- **S3-as-filesystem** — Templates are plain text files in S3 keyed by userId. `AUTHOR.md` files in the folder hierarchy provide fill instructions. DynamoDB stores only org/user/usage records.
 
 ## Stack
 
@@ -18,7 +18,7 @@ AI-powered template filling SaaS. First vertical: radiology reports.
 | API | Hono on Lambda Function URL (streaming) |
 | Frontend | React + Vite SPA on S3/CloudFront |
 | DB | DynamoDB single-table (staging: us-west-2, prod: eu-central-1) |
-| Templates | S3 with org-isolated prefixes |
+| Templates | S3 with userId-isolated prefixes (`{userId}/templates/`) |
 | Auth | Cognito (Google + email/password) |
 | AI | Bedrock — Haiku (routing/classification) + Sonnet (filling) |
 | IaC | AWS CDK (TypeScript) |
@@ -27,8 +27,9 @@ AI-powered template filling SaaS. First vertical: radiology reports.
 ## AI Flow
 
 Two-step model tiering:
-1. **Haiku** classifies intent (NEW_FILL / REFINE / RE_SELECT / UPDATE_TMPL) + matches template from taxonomy (~$0.001)
+1. **Haiku** classifies intent (NEW_FILL / REFINE / RE_SELECT / UPDATE_TMPL) + matches template by filename (~$0.001)
 2. **Sonnet** fills/refines the template with streaming output (~$0.02-0.05)
+3. **Sonnet (agent)** — multi-turn tool-use loop for managing template files (create/edit/move/delete)
 
 Session boundaries detected automatically by Haiku. Session state held client-side (no server persistence).
 
@@ -54,7 +55,7 @@ cdk deploy --context stage=prod      # Deploy production (eu-central-1)
 ## Conventions
 
 - All DynamoDB access goes through `api/src/db/entities.ts` — never use raw SDK calls elsewhere
-- S3 template keys always derived from authenticated orgId (from JWT), never from user input
+- S3 template keys always derived from authenticated userId (from JWT), never from user input. All file operations scoped via `{userId}/templates/` prefix.
 - Usage tracked via atomic counter increments (DynamoDB `ADD`), not per-record writes
 - Local dev uses `STAGE=local` env var to switch DynamoDB/S3 endpoints and skip auth
 - CDK stages: `staging` (us-west-2) and `prod` (eu-central-1) — completely separate resources per stage

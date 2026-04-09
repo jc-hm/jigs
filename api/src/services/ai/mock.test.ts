@@ -1,25 +1,22 @@
 import { describe, it, expect } from "vitest";
 import { mockRouter, mockFiller } from "./mock.js";
 
-const taxonomy = [
-  { id: "mri-knee", name: "MRI Knee", description: "Standard knee MRI", s3Key: "templates/mri-knee.md" },
-  { id: "ct-chest", name: "CT Chest", description: "Chest CT", s3Key: "templates/ct-chest.md" },
-];
+const filenames = ["mri-knee.md", "ct-chest.md"];
 
 describe("mockRouter", () => {
   it("returns NEW_FILL for a normal message", async () => {
-    const result = await mockRouter.classifyIntent(taxonomy, "left knee MRI normal");
+    const result = await mockRouter.classifyIntent(filenames, "left knee MRI normal");
     expect(result.intent).toBe("NEW_FILL");
-    expect(result.templateId).toBe("mri-knee");
+    expect(result.templateId).toBe("mri-knee.md");
   });
 
   it("returns REFINE for modification requests", async () => {
-    const result = await mockRouter.classifyIntent(taxonomy, "change the effusion to moderate");
+    const result = await mockRouter.classifyIntent(filenames, "change the effusion to moderate");
     expect(result.intent).toBe("REFINE");
   });
 
   it("returns RE_SELECT for template switch requests", async () => {
-    const result = await mockRouter.classifyIntent(taxonomy, "use a different template");
+    const result = await mockRouter.classifyIntent(filenames, "use a different template");
     expect(result.intent).toBe("RE_SELECT");
   });
 });
@@ -27,7 +24,7 @@ describe("mockRouter", () => {
 describe("mockFiller", () => {
   it("yields text chunks followed by a usage event", async () => {
     const chunks = [];
-    for await (const chunk of mockFiller.streamFillTemplate("", "", "", "test")) {
+    for await (const chunk of mockFiller.streamFillTemplate("", "", "test")) {
       chunks.push(chunk);
     }
 
@@ -49,7 +46,7 @@ describe("mockFiller", () => {
 
   it("streams content that resembles a report", async () => {
     let fullText = "";
-    for await (const chunk of mockFiller.streamFillTemplate("", "", "", "test")) {
+    for await (const chunk of mockFiller.streamFillTemplate("", "", "test")) {
       if (chunk.type === "text") fullText += chunk.text;
     }
     expect(fullText).toContain("Findings");

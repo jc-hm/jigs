@@ -1,4 +1,4 @@
-import type { TemplateTaxonomyEntry } from "../../db/entities.js";
+import type { AgentResult } from "../files/types.js";
 
 export type Intent = "NEW_FILL" | "REFINE" | "RE_SELECT" | "UPDATE_TMPL";
 
@@ -20,7 +20,7 @@ export type FillChunk =
 
 export interface AIRouter {
   classifyIntent(
-    taxonomy: TemplateTaxonomyEntry[],
+    filenames: string[],
     userMessage: string,
     sessionContext?: string,
   ): Promise<RouterResult>;
@@ -28,10 +28,17 @@ export interface AIRouter {
 
 export interface AIFiller {
   streamFillTemplate(
-    skillInstructions: string,
-    skillTone: string,
+    authorInstructions: string,
     templateContent: string,
     userDescription: string,
     conversationHistory?: Array<{ role: "user" | "assistant"; text: string }>,
   ): AsyncGenerator<FillChunk>;
+}
+
+export interface AIAgent {
+  executeFileOperations(
+    userId: string,
+    message: string,
+    existingFiles: string[],
+  ): Promise<AgentResult>;
 }

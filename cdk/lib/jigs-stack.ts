@@ -62,6 +62,7 @@ export class JigsStack extends cdk.Stack {
           : cdk.RemovalPolicy.DESTROY,
       autoDeleteObjects: stage !== "prod",
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      encryption: s3.BucketEncryption.S3_MANAGED,
     });
 
     // --- Cognito User Pool ---
@@ -89,21 +90,10 @@ export class JigsStack extends cdk.Stack {
     const userPoolClient = new cognito.UserPoolClient(this, "UserPoolClient", {
       userPool,
       userPoolClientName: `jigs-web-${stage}`,
+      generateSecret: false,
       authFlows: {
         userSrp: true,
         userPassword: true,
-      },
-      oAuth: {
-        flows: { authorizationCodeGrant: true },
-        scopes: [cognito.OAuthScope.OPENID, cognito.OAuthScope.EMAIL, cognito.OAuthScope.PROFILE],
-        callbackUrls:
-          stage === "prod"
-            ? ["https://app.jigs.ai/callback"]
-            : ["http://localhost:5173/callback"],
-        logoutUrls:
-          stage === "prod"
-            ? ["https://app.jigs.ai"]
-            : ["http://localhost:5173"],
       },
     });
 
