@@ -1,19 +1,13 @@
 import {
-  BedrockRuntimeClient,
-  ConverseCommand,
   type ContentBlock,
   type Message,
   type ToolConfiguration,
   type ToolResultContentBlock,
 } from "@aws-sdk/client-bedrock-runtime";
-import { config } from "../../env.js";
 import * as ops from "../files/operations.js";
 import type { AIAgent } from "./types.js";
 import type { AgentAction, AgentResult } from "../files/types.js";
-
-const bedrock = new BedrockRuntimeClient(
-  config.isLocal ? { region: "us-west-2" } : {}
-);
+import type { TrackedBedrock } from "../billing/tracked-bedrock.js";
 
 const MODEL_ID = "us.anthropic.claude-sonnet-4-20250514-v1:0";
 const MAX_ROUNDS = 10;
@@ -149,103 +143,106 @@ async function executeTool(
   }
 }
 
-export const bedrockAgent: AIAgent = {
-  async executeFileOperations(
-    userId: string,
-    message: string,
-    existingFiles: string[],
-  ): Promise<AgentResult> {
-    const fileList = existingFiles.map((f) => `- ${f}`).join("\n");
+export function makeBedrockAgent(tracker: TrackedBedrock): AIAgent {
+  return {
+    async executeFileOperations(
+      userId: string,
+      message: string,
+      existingFiles: string[],
+    ): Promise<AgentResult> {
+      const fileList = existingFiles.map((f) => `- ${f}`).join("\n");
 
-    const systemPrompt = `You are a template file manager. You help users create, edit, move, and delete template files.
+      const systemPrompt = `You are a template file manager. You help users create, edit, move, and delete template files.
 
 Current files:
 ${fileList || "(no files yet)"}
 
 Use the provided tools to accomplish the user's request. After making changes, respond with a brief summary of what you did.`;
 
-    const messages: Message[] = [
-      { role: "user", content: [{ text: message }] },
-    ];
+      const messages: Message[] = [
+        { role: "user", content: [{ text: message }] },
+      ];
 
-    const actions: AgentAction[] = [];
+      const actions: AgentAction[] = [];
 
-    for (let round = 0; round < MAX_ROUNDS; round++) {
-      const response = await bedrock.send(
-        new ConverseCommand({
-          modelId: MODEL_ID,
-          messages,
-          system: [{ text: systemPrompt }],
-          toolConfig,
-          inferenceConfig: {
-            maxTokens: 4096,
-            temperature: 0.2,
+      for (let round = 0; round < MAX_ROUNDS; round++) {
+        const response = await tracker.converse(
+          {
+            modelId: MODEL_ID,
+            messages,
+            system: [{ text: systemPrompt }],
+            toolConfig,
+            inferenceConfig: {
+              maxTokens: 4096,
+              temperature: 0.2,
+            },
           },
-        })
-      );
+          { action: "agent_round", agentRound: round + 1 },
+        );
 
-      const stopReason = response.stopReason;
-      const assistantContent = response.output?.message?.content || [];
+        const stopReason = response.stopReason;
+        const assistantContent = response.output?.message?.content || [];
 
-      // Add assistant response to conversation
-      messages.push({ role: "assistant", content: assistantContent as ContentBlock[] });
+        // Add assistant response to conversation
+        messages.push({ role: "assistant", content: assistantContent as ContentBlock[] });
 
-      // If model stopped without requesting tools, we're done
-      if (stopReason !== "tool_use") {
-        const textParts = assistantContent
-          .filter((b): b is ContentBlock & { text: string } => "text" in b && typeof b.text === "string")
-          .map((b) => b.text);
+        // If model stopped without requesting tools, we're done
+        if (stopReason !== "tool_use") {
+          const textParts = assistantContent
+            .filter((b): b is ContentBlock & { text: string } => "text" in b && typeof b.text === "string")
+            .map((b) => b.text);
 
-        return {
-          actions,
-          message: textParts.join("\n") || "Done.",
-          changedPaths: actions.map((a) => a.path).filter((p): p is string => !!p),
-        };
-      }
-
-      // Execute tool calls
-      const toolResults: ContentBlock[] = [];
-
-      for (const block of assistantContent) {
-        if (!("toolUse" in block) || !block.toolUse) continue;
-
-        const { toolUseId, name, input } = block.toolUse;
-        if (!toolUseId || !name) continue;
-
-        try {
-          const { result, action } = await executeTool(
-            userId,
-            name,
-            input as Record<string, string>,
-          );
-          if (action) actions.push(action);
-
-          toolResults.push({
-            toolResult: {
-              toolUseId,
-              content: [{ text: result } as ToolResultContentBlock],
-            },
-          } as ContentBlock);
-        } catch (err) {
-          toolResults.push({
-            toolResult: {
-              toolUseId,
-              content: [{ text: `Error: ${err instanceof Error ? err.message : String(err)}` } as ToolResultContentBlock],
-              status: "error",
-            },
-          } as ContentBlock);
+          return {
+            actions,
+            message: textParts.join("\n") || "Done.",
+            changedPaths: actions.map((a) => a.path).filter((p): p is string => !!p),
+          };
         }
+
+        // Execute tool calls
+        const toolResults: ContentBlock[] = [];
+
+        for (const block of assistantContent) {
+          if (!("toolUse" in block) || !block.toolUse) continue;
+
+          const { toolUseId, name, input } = block.toolUse;
+          if (!toolUseId || !name) continue;
+
+          try {
+            const { result, action } = await executeTool(
+              userId,
+              name,
+              input as Record<string, string>,
+            );
+            if (action) actions.push(action);
+
+            toolResults.push({
+              toolResult: {
+                toolUseId,
+                content: [{ text: result } as ToolResultContentBlock],
+              },
+            } as ContentBlock);
+          } catch (err) {
+            toolResults.push({
+              toolResult: {
+                toolUseId,
+                content: [{ text: `Error: ${err instanceof Error ? err.message : String(err)}` } as ToolResultContentBlock],
+                status: "error",
+              },
+            } as ContentBlock);
+          }
+        }
+
+        // Feed tool results back
+        messages.push({ role: "user", content: toolResults });
       }
 
-      // Feed tool results back
-      messages.push({ role: "user", content: toolResults });
-    }
-
-    // Max rounds reached
-    return {
-      actions,
-      message: "Reached maximum operation limit. Some changes may be incomplete.",
-      changedPaths: actions.map((a) => a.path).filter((p): p is string => !!p),
-    };
-  },
-};
+      // Max rounds reached
+      return {
+        actions,
+        message: "Reached maximum operation limit. Some changes may be incomplete.",
+        changedPaths: actions.map((a) => a.path).filter((p): p is string => !!p),
+      };
+    },
+  };
+}

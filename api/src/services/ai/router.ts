@@ -1,13 +1,7 @@
-import {
-  BedrockRuntimeClient,
-  ConverseCommand,
-} from "@aws-sdk/client-bedrock-runtime";
 import type { AIRouter, RouterResult } from "./types.js";
-import { config } from "../../env.js";
+import type { TrackedBedrock } from "../billing/tracked-bedrock.js";
 
-const bedrock = new BedrockRuntimeClient(
-  config.isLocal ? { region: "us-west-2" } : {}
-);
+const MODEL_ID = "us.anthropic.claude-haiku-4-5-20251001-v1:0";
 
 export function buildRouterPrompt(
   filenames: string[],
@@ -31,43 +25,46 @@ Respond with JSON only: {"intent": "NEW_FILL", "templateId": "mri-knee.md"} or {
 If intent is NEW_FILL, you MUST include templateId (the exact filename from the list above). For other intents, templateId is optional.`;
 }
 
-export const bedrockRouter: AIRouter = {
-  async classifyIntent(
-    filenames: string[],
-    userMessage: string,
-    sessionContext?: string,
-  ): Promise<RouterResult> {
-    const systemPrompt = buildRouterPrompt(filenames, sessionContext);
+export function makeBedrockRouter(tracker: TrackedBedrock): AIRouter {
+  return {
+    async classifyIntent(
+      filenames: string[],
+      userMessage: string,
+      sessionContext?: string,
+    ): Promise<RouterResult> {
+      const systemPrompt = buildRouterPrompt(filenames, sessionContext);
 
-    const response = await bedrock.send(
-      new ConverseCommand({
-        modelId: "us.anthropic.claude-haiku-4-5-20251001-v1:0",
-        messages: [{ role: "user", content: [{ text: userMessage }] }],
-        system: [{ text: systemPrompt }],
-        inferenceConfig: {
-          maxTokens: 100,
-          temperature: 0,
+      const response = await tracker.converse(
+        {
+          modelId: MODEL_ID,
+          messages: [{ role: "user", content: [{ text: userMessage }] }],
+          system: [{ text: systemPrompt }],
+          inferenceConfig: {
+            maxTokens: 100,
+            temperature: 0,
+          },
         },
-      })
-    );
+        { action: "router" },
+      );
 
-    const text =
-      response.output?.message?.content?.[0]?.text || '{"intent": "NEW_FILL"}';
-    // Extract JSON from response (model may wrap it in markdown code fences)
-    const jsonMatch = text.match(/\{[^}]+\}/);
-    if (!jsonMatch) {
-      return { intent: "NEW_FILL" };
-    }
+      const text =
+        response.output?.message?.content?.[0]?.text || '{"intent": "NEW_FILL"}';
+      // Extract JSON from response (model may wrap it in markdown code fences)
+      const jsonMatch = text.match(/\{[^}]+\}/);
+      if (!jsonMatch) {
+        return { intent: "NEW_FILL" };
+      }
 
-    try {
-      const parsed = JSON.parse(jsonMatch[0]);
-      return {
-        intent: parsed.intent || "NEW_FILL",
-        templateId: parsed.templateId,
-        message: parsed.message,
-      };
-    } catch {
-      return { intent: "NEW_FILL" };
-    }
-  },
-};
+      try {
+        const parsed = JSON.parse(jsonMatch[0]);
+        return {
+          intent: parsed.intent || "NEW_FILL",
+          templateId: parsed.templateId,
+          message: parsed.message,
+        };
+      } catch {
+        return { intent: "NEW_FILL" };
+      }
+    },
+  };
+}

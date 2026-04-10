@@ -131,26 +131,61 @@ export async function autoProvisionUser(
 
 // --- Usage ---
 
-export async function incrementUsage(
+export type UsageAction = "router" | "fill" | "refine" | "agent_round";
+
+/**
+ * Increment per-call usage counters for a single AI call.
+ *
+ * Updates user-monthly, org-monthly, and (for fill/refine) the user-daily
+ * counter used by the legacy free-tier limit. `reportCount` only increments
+ * for fill/refine so existing free-tier semantics are preserved; router and
+ * agent_round contribute to cost and token totals but not to reportCount.
+ */
+export async function incrementUsageCounters(
   userId: string,
   orgId: string,
-  costUsd: number
+  args: {
+    action: UsageAction;
+    costUsd: number;
+    inputTokens: number;
+    outputTokens: number;
+  }
 ): Promise<void> {
   const now = new Date();
   const monthKey = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
   const dayKey = now.toISOString().slice(0, 10);
   const ttl = Math.floor(now.getTime() / 1000) + 48 * 3600;
 
-  // Increment all three counters in parallel
-  await Promise.all([
+  const isReport = args.action === "fill" || args.action === "refine";
+  const callField =
+    args.action === "router"
+      ? "routerCalls"
+      : args.action === "agent_round"
+        ? "agentRounds"
+        : "fillerCalls";
+
+  // Build the monthly UpdateExpression. ADD handles missing attributes by
+  // initializing to 0 first, so this works for the first call of the period.
+  const monthlyUpdate = isReport
+    ? "ADD reportCount :one, totalCostUsd :cost, inputTokens :in, outputTokens :out, #call :one"
+    : "ADD totalCostUsd :cost, inputTokens :in, outputTokens :out, #call :one";
+
+  const monthlyValues: Record<string, number> = {
+    ":cost": args.costUsd,
+    ":in": args.inputTokens,
+    ":out": args.outputTokens,
+    ":one": 1,
+  };
+
+  const writes: Promise<unknown>[] = [
     // User monthly
     db.send(
       new UpdateCommand({
         TableName: TABLE_NAME,
         Key: { PK: `USER#${userId}`, SK: `USAGE#${monthKey}` },
-        UpdateExpression:
-          "ADD reportCount :one, totalCostUsd :cost",
-        ExpressionAttributeValues: { ":one": 1, ":cost": costUsd },
+        UpdateExpression: monthlyUpdate,
+        ExpressionAttributeNames: { "#call": callField },
+        ExpressionAttributeValues: monthlyValues,
       })
     ),
     // Org monthly
@@ -158,22 +193,29 @@ export async function incrementUsage(
       new UpdateCommand({
         TableName: TABLE_NAME,
         Key: { PK: `ORG#${orgId}`, SK: `USAGE#${monthKey}` },
-        UpdateExpression:
-          "ADD reportCount :one, totalCostUsd :cost",
-        ExpressionAttributeValues: { ":one": 1, ":cost": costUsd },
+        UpdateExpression: monthlyUpdate,
+        ExpressionAttributeNames: { "#call": callField },
+        ExpressionAttributeValues: monthlyValues,
       })
     ),
-    // User daily (with TTL)
-    db.send(
-      new UpdateCommand({
-        TableName: TABLE_NAME,
-        Key: { PK: `USER#${userId}`, SK: `DAILY#${dayKey}` },
-        UpdateExpression: "ADD reportCount :one SET #ttl = :ttl",
-        ExpressionAttributeNames: { "#ttl": "TTL" },
-        ExpressionAttributeValues: { ":one": 1, ":ttl": ttl },
-      })
-    ),
-  ]);
+  ];
+
+  // Daily counter only for report-producing calls (preserves free-tier limit).
+  if (isReport) {
+    writes.push(
+      db.send(
+        new UpdateCommand({
+          TableName: TABLE_NAME,
+          Key: { PK: `USER#${userId}`, SK: `DAILY#${dayKey}` },
+          UpdateExpression: "ADD reportCount :one SET #ttl = :ttl",
+          ExpressionAttributeNames: { "#ttl": "TTL" },
+          ExpressionAttributeValues: { ":one": 1, ":ttl": ttl },
+        })
+      )
+    );
+  }
+
+  await Promise.all(writes);
 }
 
 export async function getDailyUsage(userId: string): Promise<number> {
@@ -187,9 +229,17 @@ export async function getDailyUsage(userId: string): Promise<number> {
   return res.Item?.reportCount ?? 0;
 }
 
-export async function getMonthlyUsage(
-  pk: string
-): Promise<{ reportCount: number; totalCostUsd: number }> {
+export interface MonthlyUsage {
+  reportCount: number;
+  totalCostUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  routerCalls: number;
+  fillerCalls: number;
+  agentRounds: number;
+}
+
+export async function getMonthlyUsage(pk: string): Promise<MonthlyUsage> {
   const now = new Date();
   const monthKey = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
   const res = await db.send(
@@ -201,5 +251,67 @@ export async function getMonthlyUsage(
   return {
     reportCount: res.Item?.reportCount ?? 0,
     totalCostUsd: res.Item?.totalCostUsd ?? 0,
+    inputTokens: res.Item?.inputTokens ?? 0,
+    outputTokens: res.Item?.outputTokens ?? 0,
+    routerCalls: res.Item?.routerCalls ?? 0,
+    fillerCalls: res.Item?.fillerCalls ?? 0,
+    agentRounds: res.Item?.agentRounds ?? 0,
   };
+}
+
+// --- Org balance (prepaid credits) ---
+
+export interface OrgBalance {
+  balanceUsd: number;
+  topUpsUsd: number;
+  spentUsd: number;
+}
+
+export async function getOrgBalance(orgId: string): Promise<OrgBalance> {
+  const res = await db.send(
+    new GetCommand({
+      TableName: TABLE_NAME,
+      Key: { PK: `ORG#${orgId}`, SK: "BALANCE" },
+    })
+  );
+  return {
+    balanceUsd: res.Item?.balanceUsd ?? 0,
+    topUpsUsd: res.Item?.topUpsUsd ?? 0,
+    spentUsd: res.Item?.spentUsd ?? 0,
+  };
+}
+
+/**
+ * Credit the org's balance. Atomic ADD; creates the item if missing.
+ * Use for: manual topups, signup grants, eventually Stripe webhook.
+ */
+export async function addBalance(orgId: string, amountUsd: number): Promise<void> {
+  if (amountUsd <= 0) throw new Error("addBalance amount must be positive");
+  await db.send(
+    new UpdateCommand({
+      TableName: TABLE_NAME,
+      Key: { PK: `ORG#${orgId}`, SK: "BALANCE" },
+      UpdateExpression: "ADD balanceUsd :amt, topUpsUsd :amt",
+      ExpressionAttributeValues: { ":amt": amountUsd },
+    })
+  );
+}
+
+/**
+ * Debit the org's balance after a successful Bedrock call. Atomic ADD with
+ * a negative value, plus a positive `spentUsd` accumulator. Allowed to drift
+ * slightly negative (one call's worth) since the pre-call check is only
+ * `balance > 0`.
+ */
+export async function deductBalance(orgId: string, amountUsd: number): Promise<void> {
+  if (amountUsd < 0) throw new Error("deductBalance amount must be non-negative");
+  if (amountUsd === 0) return;
+  await db.send(
+    new UpdateCommand({
+      TableName: TABLE_NAME,
+      Key: { PK: `ORG#${orgId}`, SK: "BALANCE" },
+      UpdateExpression: "ADD balanceUsd :neg, spentUsd :pos",
+      ExpressionAttributeValues: { ":neg": -amountUsd, ":pos": amountUsd },
+    })
+  );
 }

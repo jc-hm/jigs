@@ -40,3 +40,16 @@ Ideas and improvements to address later. Not prioritized — just captured so th
 ## Auth
 
 - **Local dev multi-user testing**: Currently local mode hardcodes a single `test-user`. Add support for switching between test personas (e.g., `?user=admin`, `?user=freeuser`) to test role-based behavior without Cognito.
+
+## Usage Tracking & Billing
+
+Phase 1 (wrapped Bedrock client + org balance) is in scope. The following are deferred until needed:
+
+- **S3 per-call event records**: Write each Bedrock call as an NDJSON line to `s3://jigs-usage-{stage}-{account}/events/year=YYYY/month=MM/day=DD/{requestId}.ndjson`. Enables historical graphs, per-template cost analysis, and billing dispute audit trail. Add when "show me my usage by day" or per-call drilldown matters. Hive-style partitioning is forward-compatible with Athena when query needs grow.
+- **Athena over S3 events**: SQL analytics on the NDJSON event store. Add when scanning files in Lambda becomes too slow (~100K+ events).
+- **Stripe top-up webhook**: Wire Stripe Checkout to `addBalance(orgId, amountUsd)` when ready to monetize. The balance mechanic is already in place — only the payment trigger is missing.
+- **Spread/markup pricing**: The `SPREAD` constant in `tracker.ts` starts at `1.0` (cost-only). Set it when pricing is decided. Cost-plus model is data-ready — `costUsd` per call is captured in counters.
+- **Per-template / per-model cost analytics**: Needs S3 event records to break down cost by `templatePath` or `modelId`. Counter approach can't decompose totals.
+- **Agent rate limiting**: Currently no limit on agent rounds (per direction). Track but don't gate. Add a separate `agentRoundsToday` counter with a free-tier cap if abuse becomes a concern.
+- **Replace daily report counter with balance check**: Once topups are live, the free-tier daily limit (`FREE_DAILY_LIMIT = 10` in `tracker.ts`) can be retired in favor of "balance > 0". New users get a starter credit on signup.
+- **Multi-month usage history endpoint**: `GET /api/v1/billing/usage/history?months=N` querying `SK begins_with USAGE#`. Already supported by the key design — just needs the route handler and frontend chart.

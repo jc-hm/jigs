@@ -10,7 +10,7 @@ import {
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { putOrg, putUser } from "./entities.js";
+import { addBalance, getOrgBalance, putOrg, putUser } from "./entities.js";
 
 const client = new DynamoDBClient({
   endpoint: "http://localhost:8000",
@@ -86,6 +86,15 @@ export async function seed() {
     role: "admin",
     cognitoId: "test-cognito-id",
   });
+
+  // Seed a starter balance so the local TrackedBedrock gate passes. Idempotent
+  // top-ups would inflate the balance on every re-seed, so we only credit if
+  // the balance is currently zero.
+  const existing = await getOrgBalance("test-org");
+  if (existing.balanceUsd <= 0) {
+    await addBalance("test-org", 10);
+    console.log("Seeded test-org with $10 starter balance");
+  }
 
   // Create S3 bucket and upload templates
   try {

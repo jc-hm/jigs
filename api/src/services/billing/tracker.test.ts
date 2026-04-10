@@ -14,6 +14,26 @@ describe("calculateCost", () => {
     expect(cost).toBeCloseTo(0.0105);
   });
 
+  it("normalizes Bedrock cross-region inference IDs (us. prefix, version suffix)", () => {
+    // Real IDs returned by the Bedrock SDK include a region prefix and a
+    // version suffix; calculateCost must strip both before lookup.
+    const cost = calculateCost(
+      "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+      1000,
+      500,
+    );
+    expect(cost).toBeCloseTo(0.0028);
+  });
+
+  it("normalizes Sonnet inference profile ID", () => {
+    const cost = calculateCost(
+      "us.anthropic.claude-sonnet-4-20250514-v1:0",
+      1000,
+      500,
+    );
+    expect(cost).toBeCloseTo(0.0105);
+  });
+
   it("returns 0 for unknown model", () => {
     expect(calculateCost("unknown-model", 1000, 500)).toBe(0);
   });

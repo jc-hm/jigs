@@ -1,10 +1,19 @@
 import type { AIRouter, AIFiller, AIAgent } from "./types.js";
 import { config } from "../../env.js";
 import type { AIProvider } from "../../env.js";
+import type { TrackedBedrock } from "../billing/tracked-bedrock.js";
 
-let router: AIRouter | null = null;
-let filler: AIFiller | null = null;
-let agent: AIAgent | null = null;
+// Mock and Ollama services don't depend on the per-request tracker (they
+// have no real cost), so we memoize them. The Bedrock services are built
+// per-request because they close over the TrackedBedrock instance.
+let mockOrOllamaRouter: AIRouter | null = null;
+let mockOrOllamaFiller: AIFiller | null = null;
+let mockOrOllamaAgent: AIAgent | null = null;
+
+// Test override slots — bypasses provider resolution entirely.
+let injectedRouter: AIRouter | null = null;
+let injectedFiller: AIFiller | null = null;
+let injectedAgent: AIAgent | null = null;
 
 function resolveProvider(): AIProvider {
   // Deployed mode always uses Bedrock
@@ -13,77 +22,87 @@ function resolveProvider(): AIProvider {
   return config.aiProvider;
 }
 
-export async function getAIRouter(): Promise<AIRouter> {
-  if (!router) {
-    const provider = resolveProvider();
-    switch (provider) {
-      case "ollama": {
-        const { ollamaRouter } = await import("./ollama.js");
-        router = ollamaRouter;
-        break;
-      }
-      case "bedrock": {
-        const { bedrockRouter } = await import("./router.js");
-        router = bedrockRouter;
-        break;
-      }
-      default: {
-        const { mockRouter } = await import("./mock.js");
-        router = mockRouter;
-      }
+export async function getAIRouter(tracker?: TrackedBedrock): Promise<AIRouter> {
+  if (injectedRouter) return injectedRouter;
+
+  const provider = resolveProvider();
+  if (provider === "bedrock") {
+    if (!tracker) {
+      throw new Error("Bedrock router requires a TrackedBedrock instance");
+    }
+    const { makeBedrockRouter } = await import("./router.js");
+    return makeBedrockRouter(tracker);
+  }
+
+  if (!mockOrOllamaRouter) {
+    if (provider === "ollama") {
+      const { ollamaRouter } = await import("./ollama.js");
+      mockOrOllamaRouter = ollamaRouter;
+    } else {
+      const { mockRouter } = await import("./mock.js");
+      mockOrOllamaRouter = mockRouter;
     }
   }
-  return router;
+  return mockOrOllamaRouter;
 }
 
-export async function getAIFiller(): Promise<AIFiller> {
-  if (!filler) {
-    const provider = resolveProvider();
-    switch (provider) {
-      case "ollama": {
-        const { ollamaFiller } = await import("./ollama.js");
-        filler = ollamaFiller;
-        break;
-      }
-      case "bedrock": {
-        const { bedrockFiller } = await import("./filler.js");
-        filler = bedrockFiller;
-        break;
-      }
-      default: {
-        const { mockFiller } = await import("./mock.js");
-        filler = mockFiller;
-      }
+export async function getAIFiller(tracker?: TrackedBedrock): Promise<AIFiller> {
+  if (injectedFiller) return injectedFiller;
+
+  const provider = resolveProvider();
+  if (provider === "bedrock") {
+    if (!tracker) {
+      throw new Error("Bedrock filler requires a TrackedBedrock instance");
+    }
+    const { makeBedrockFiller } = await import("./filler.js");
+    return makeBedrockFiller(tracker);
+  }
+
+  if (!mockOrOllamaFiller) {
+    if (provider === "ollama") {
+      const { ollamaFiller } = await import("./ollama.js");
+      mockOrOllamaFiller = ollamaFiller;
+    } else {
+      const { mockFiller } = await import("./mock.js");
+      mockOrOllamaFiller = mockFiller;
     }
   }
-  return filler;
+  return mockOrOllamaFiller;
 }
 
-export async function getAIAgent(): Promise<AIAgent> {
-  if (!agent) {
-    const provider = resolveProvider();
-    switch (provider) {
-      case "ollama": {
-        const { ollamaAgent } = await import("./ollama.js");
-        agent = ollamaAgent;
-        break;
-      }
-      case "bedrock": {
-        const { bedrockAgent } = await import("./agent.js");
-        agent = bedrockAgent;
-        break;
-      }
-      default: {
-        const { mockAgent } = await import("./mock.js");
-        agent = mockAgent;
-      }
+export async function getAIAgent(tracker?: TrackedBedrock): Promise<AIAgent> {
+  if (injectedAgent) return injectedAgent;
+
+  const provider = resolveProvider();
+  if (provider === "bedrock") {
+    if (!tracker) {
+      throw new Error("Bedrock agent requires a TrackedBedrock instance");
+    }
+    const { makeBedrockAgent } = await import("./agent.js");
+    return makeBedrockAgent(tracker);
+  }
+
+  if (!mockOrOllamaAgent) {
+    if (provider === "ollama") {
+      const { ollamaAgent } = await import("./ollama.js");
+      mockOrOllamaAgent = ollamaAgent;
+    } else {
+      const { mockAgent } = await import("./mock.js");
+      mockOrOllamaAgent = mockAgent;
     }
   }
-  return agent;
+  return mockOrOllamaAgent;
 }
 
 // For tests: inject custom implementations
-export function _setAIRouter(r: AIRouter) { router = r; }
-export function _setAIFiller(f: AIFiller) { filler = f; }
-export function _setAIAgent(a: AIAgent) { agent = a; }
-export function _resetAI() { router = null; filler = null; agent = null; }
+export function _setAIRouter(r: AIRouter) { injectedRouter = r; }
+export function _setAIFiller(f: AIFiller) { injectedFiller = f; }
+export function _setAIAgent(a: AIAgent) { injectedAgent = a; }
+export function _resetAI() {
+  injectedRouter = null;
+  injectedFiller = null;
+  injectedAgent = null;
+  mockOrOllamaRouter = null;
+  mockOrOllamaFiller = null;
+  mockOrOllamaAgent = null;
+}

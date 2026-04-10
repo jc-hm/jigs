@@ -9,6 +9,8 @@ import {
   mkdir,
 } from "../services/files/operations.js";
 import { getAIAgent } from "../services/ai/provider.js";
+import { TrackedBedrock } from "../services/billing/tracked-bedrock.js";
+import { InsufficientBalanceError } from "../services/billing/tracker.js";
 import type { AppEnv } from "../types.js";
 
 const templates = new Hono<AppEnv>();
@@ -85,9 +87,26 @@ templates.post("/agent", async (c) => {
   if (!body.message?.trim()) return c.json({ error: "message is required" }, 400);
 
   const allFiles = await lsRecursive(user.userId);
-  const agent = await getAIAgent();
-  const result = await agent.executeFileOperations(user.userId, body.message, allFiles);
-  return c.json(result);
+
+  // Per-request Bedrock wrapper. The agent loop can run up to 10 Sonnet
+  // rounds; each round is tracked individually with its agentRound number.
+  const requestId = crypto.randomUUID();
+  const tracker = new TrackedBedrock({
+    userId: user.userId,
+    orgId: user.orgId,
+    requestId,
+  });
+
+  try {
+    const agent = await getAIAgent(tracker);
+    const result = await agent.executeFileOperations(user.userId, body.message, allFiles);
+    return c.json(result);
+  } catch (err) {
+    if (err instanceof InsufficientBalanceError) {
+      return c.json({ error: "Insufficient balance. Please top up." }, 402);
+    }
+    throw err;
+  }
 });
 
 export { templates };

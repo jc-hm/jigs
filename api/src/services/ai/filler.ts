@@ -1,66 +1,60 @@
-import {
-  BedrockRuntimeClient,
-  ConverseStreamCommand,
-} from "@aws-sdk/client-bedrock-runtime";
 import type { AIFiller, FillChunk } from "./types.js";
-import { config } from "../../env.js";
-
-const bedrock = new BedrockRuntimeClient(
-  config.isLocal ? { region: "us-west-2" } : {}
-);
+import type { TrackedBedrock } from "../billing/tracked-bedrock.js";
 
 const MODEL_ID = "us.anthropic.claude-sonnet-4-20250514-v1:0";
 
-export const bedrockFiller: AIFiller = {
-  async *streamFillTemplate(
-    authorInstructions: string,
-    templateContent: string,
-    userDescription: string,
-    conversationHistory?: Array<{ role: "user" | "assistant"; text: string }>,
-  ): AsyncGenerator<FillChunk> {
-    const systemPrompt = `${authorInstructions}
+export function makeBedrockFiller(tracker: TrackedBedrock): AIFiller {
+  return {
+    async *streamFillTemplate(
+      authorInstructions: string,
+      templateContent: string,
+      userDescription: string,
+      conversationHistory?: Array<{ role: "user" | "assistant"; text: string }>,
+    ): AsyncGenerator<FillChunk> {
+      const systemPrompt = `${authorInstructions}
 
 Template:
 ${templateContent}
 
 Fill this template based on the user's clinical description. Output only the completed report.`;
 
-    const messages: Array<{
-      role: "user" | "assistant";
-      content: Array<{ text: string }>;
-    }> = [];
+      const messages: Array<{
+        role: "user" | "assistant";
+        content: Array<{ text: string }>;
+      }> = [];
 
-    if (conversationHistory) {
-      for (const msg of conversationHistory) {
-        messages.push({
-          role: msg.role,
-          content: [{ text: msg.text }],
-        });
+      if (conversationHistory) {
+        for (const msg of conversationHistory) {
+          messages.push({
+            role: msg.role,
+            content: [{ text: msg.text }],
+          });
+        }
       }
-    }
 
-    messages.push({
-      role: "user",
-      content: [{ text: userDescription }],
-    });
+      messages.push({
+        role: "user",
+        content: [{ text: userDescription }],
+      });
 
-    const response = await bedrock.send(
-      new ConverseStreamCommand({
-        modelId: MODEL_ID,
-        messages,
-        system: [{ text: systemPrompt }],
-        inferenceConfig: {
-          maxTokens: 4096,
-          temperature: 0.3,
+      let inputTokens = 0;
+      let outputTokens = 0;
+
+      // The tracker handles cost capture/deduction; we just stream text
+      // chunks out and observe the final usage metadata for the legacy
+      // FillChunk "usage" event the frontend still consumes.
+      for await (const event of tracker.converseStream(
+        {
+          modelId: MODEL_ID,
+          messages,
+          system: [{ text: systemPrompt }],
+          inferenceConfig: {
+            maxTokens: 4096,
+            temperature: 0.3,
+          },
         },
-      })
-    );
-
-    let inputTokens = 0;
-    let outputTokens = 0;
-
-    if (response.stream) {
-      for await (const event of response.stream) {
+        { action: "fill" },
+      )) {
         if (event.contentBlockDelta?.delta?.text) {
           yield { type: "text", text: event.contentBlockDelta.delta.text };
         }
@@ -69,11 +63,11 @@ Fill this template based on the user's clinical description. Output only the com
           outputTokens = event.metadata.usage.outputTokens ?? 0;
         }
       }
-    }
 
-    yield {
-      type: "usage",
-      data: { inputTokens, outputTokens, modelId: MODEL_ID },
-    };
-  },
-};
+      yield {
+        type: "usage",
+        data: { inputTokens, outputTokens, modelId: MODEL_ID },
+      };
+    },
+  };
+}
