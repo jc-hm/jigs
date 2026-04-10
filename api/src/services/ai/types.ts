@@ -40,5 +40,6 @@ export interface AIAgent {
     userId: string,
     message: string,
     existingFiles: string[],
+    conversationHistory?: Array<{ role: "user" | "assistant"; text: string }>,
   ): Promise<AgentResult>;
 }

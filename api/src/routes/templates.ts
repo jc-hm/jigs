@@ -83,14 +83,19 @@ templates.post("/mkdir", async (c) => {
 // AI agent: natural language file operations
 templates.post("/agent", async (c) => {
   const user = c.get("user");
-  const body = await c.req.json<{ message: string }>();
+  const body = await c.req.json<{
+    message: string;
+    conversationHistory?: Array<{ role: "user" | "assistant"; text: string }>;
+  }>();
   if (!body.message?.trim()) return c.json({ error: "message is required" }, 400);
 
   const allFiles = await lsRecursive(user.userId);
 
   // Per-request Bedrock wrapper. The agent loop can run up to 10 Sonnet
   // rounds; each round is tracked individually with its agentRound number.
-  const requestId = crypto.randomUUID();
+  // requestId comes from the global middleware so all logs for this request
+  // (router, agent rounds, errors) share the same id.
+  const requestId = c.get("requestId");
   const tracker = new TrackedBedrock({
     userId: user.userId,
     orgId: user.orgId,
@@ -99,7 +104,12 @@ templates.post("/agent", async (c) => {
 
   try {
     const agent = await getAIAgent(tracker);
-    const result = await agent.executeFileOperations(user.userId, body.message, allFiles);
+    const result = await agent.executeFileOperations(
+      user.userId,
+      body.message,
+      allFiles,
+      body.conversationHistory,
+    );
     return c.json(result);
   } catch (err) {
     if (err instanceof InsufficientBalanceError) {

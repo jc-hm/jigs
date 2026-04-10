@@ -412,7 +412,7 @@ export function Templates() {
       setMessages((prev) => [...prev, { role: "user", text: userMessage }]);
 
       try {
-        const result: AgentResult = await runAgent(userMessage);
+        const result: AgentResult = await runAgent(userMessage, messages);
         const actionSummaries = result.actions
           .map((a) => `- ${a.summary}`)
           .join("\n");
@@ -444,7 +444,7 @@ export function Templates() {
         );
       }
     },
-    [input, isProcessing, refreshTree, selectFile]
+    [input, isProcessing, messages, refreshTree, selectFile]
   );
 
   const handleChatKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {

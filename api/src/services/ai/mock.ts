@@ -55,6 +55,7 @@ export const mockAgent: AIAgent = {
     _userId: string,
     message: string,
     existingFiles: string[],
+    _conversationHistory?: Array<{ role: "user" | "assistant"; text: string }>,
   ): Promise<AgentResult> {
     // Mock: create a new file based on message
     return {

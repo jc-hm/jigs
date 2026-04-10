@@ -151,9 +151,12 @@ export async function fileMkdir(path: string): Promise<void> {
   });
 }
 
-export async function runAgent(message: string): Promise<AgentResult> {
+export async function runAgent(
+  message: string,
+  conversationHistory?: Array<{ role: "user" | "assistant"; text: string }>,
+): Promise<AgentResult> {
   return apiFetch<AgentResult>("/templates/agent", {
     method: "POST",
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message, conversationHistory }),
   });
 }

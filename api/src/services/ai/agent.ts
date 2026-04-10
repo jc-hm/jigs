@@ -8,6 +8,7 @@ import * as ops from "../files/operations.js";
 import type { AIAgent } from "./types.js";
 import type { AgentAction, AgentResult } from "../files/types.js";
 import type { TrackedBedrock } from "../billing/tracked-bedrock.js";
+import { log, preview } from "../../lib/log.js";
 
 const MODEL_ID = "us.anthropic.claude-sonnet-4-20250514-v1:0";
 const MAX_ROUNDS = 10;
@@ -149,19 +150,48 @@ export function makeBedrockAgent(tracker: TrackedBedrock): AIAgent {
       userId: string,
       message: string,
       existingFiles: string[],
+      conversationHistory?: Array<{ role: "user" | "assistant"; text: string }>,
     ): Promise<AgentResult> {
       const fileList = existingFiles.map((f) => `- ${f}`).join("\n");
 
+      // Two important properties of this prompt:
+      //   1. "Respond in the same language..." — without this, Sonnet often
+      //      replies in English even when the user wrote Spanish, then leaks
+      //      tool descriptions verbatim from this prompt as filler text.
+      //   2. "Never mention tool names..." — keeps internal vocabulary
+      //      (read_file, write_file, etc.) out of user-facing summaries.
       const systemPrompt = `You are a template file manager. You help users create, edit, move, and delete template files.
 
 Current files:
 ${fileList || "(no files yet)"}
 
-Use the provided tools to accomplish the user's request. After making changes, respond with a brief summary of what you did.`;
+Rules for your responses:
+- Respond in the same language the user writes in. If they write in Spanish, respond in Spanish; in French, respond in French; and so on.
+- Never mention tool names (read_file, write_file, list_files, move_file, delete_file), tool parameter names, or any of the internal options described to you. Describe what you did in plain natural language as if you performed the actions yourself.
+- After completing the user's request, give one short summary of what changed.
+- Use the provided tools to accomplish the request — but never describe them to the user.`;
 
-      const messages: Message[] = [
-        { role: "user", content: [{ text: message }] },
-      ];
+      // Thread prior turns so multi-turn references like "now move it to
+      // neuro/" work. Frontend stores plain {role, text}; we wrap each as
+      // a single text block. Tool-use details from prior rounds are not
+      // re-included (they don't survive across requests anyway), but the
+      // assistant's natural-language summary — which already includes the
+      // action list — is enough context.
+      const messages: Message[] = [];
+      if (conversationHistory && conversationHistory.length > 0) {
+        for (const m of conversationHistory) {
+          messages.push({ role: m.role, content: [{ text: m.text }] });
+        }
+      }
+      messages.push({ role: "user", content: [{ text: message }] });
+
+      log.info("agent.start", {
+        requestId: tracker.requestId,
+        userId,
+        historyTurns: conversationHistory?.length ?? 0,
+        existingFileCount: existingFiles.length,
+        messagePreview: preview(message, 200),
+      });
 
       const actions: AgentAction[] = [];
 
@@ -192,6 +222,15 @@ Use the provided tools to accomplish the user's request. After making changes, r
             .filter((b): b is ContentBlock & { text: string } => "text" in b && typeof b.text === "string")
             .map((b) => b.text);
 
+          log.info("agent.complete", {
+            requestId: tracker.requestId,
+            userId,
+            roundsUsed: round + 1,
+            stopReason,
+            actionCount: actions.length,
+            actions: actions.map((a) => a.tool),
+          });
+
           return {
             actions,
             message: textParts.join("\n") || "Done.",
@@ -201,12 +240,15 @@ Use the provided tools to accomplish the user's request. After making changes, r
 
         // Execute tool calls
         const toolResults: ContentBlock[] = [];
+        const roundToolCalls: string[] = [];
 
         for (const block of assistantContent) {
           if (!("toolUse" in block) || !block.toolUse) continue;
 
           const { toolUseId, name, input } = block.toolUse;
           if (!toolUseId || !name) continue;
+
+          roundToolCalls.push(name);
 
           try {
             const { result, action } = await executeTool(
@@ -216,6 +258,15 @@ Use the provided tools to accomplish the user's request. After making changes, r
             );
             if (action) actions.push(action);
 
+            log.info("agent.tool.ok", {
+              requestId: tracker.requestId,
+              userId,
+              round: round + 1,
+              tool: name,
+              input: preview(input, 200),
+              resultPreview: preview(result, 200),
+            });
+
             toolResults.push({
               toolResult: {
                 toolUseId,
@@ -223,6 +274,14 @@ Use the provided tools to accomplish the user's request. After making changes, r
               },
             } as ContentBlock);
           } catch (err) {
+            log.error("agent.tool.failed", err, {
+              requestId: tracker.requestId,
+              userId,
+              round: round + 1,
+              tool: name,
+              input: preview(input, 200),
+            });
+
             toolResults.push({
               toolResult: {
                 toolUseId,
@@ -233,11 +292,26 @@ Use the provided tools to accomplish the user's request. After making changes, r
           }
         }
 
+        log.info("agent.round", {
+          requestId: tracker.requestId,
+          userId,
+          round: round + 1,
+          stopReason,
+          toolsCalled: roundToolCalls,
+        });
+
         // Feed tool results back
         messages.push({ role: "user", content: toolResults });
       }
 
       // Max rounds reached
+      log.warn("agent.max_rounds", {
+        requestId: tracker.requestId,
+        userId,
+        actionCount: actions.length,
+        actions: actions.map((a) => a.tool),
+      });
+
       return {
         actions,
         message: "Reached maximum operation limit. Some changes may be incomplete.",

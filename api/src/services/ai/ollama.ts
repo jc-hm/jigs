@@ -75,6 +75,7 @@ export const ollamaAgent: AIAgent = {
     _userId: string,
     message: string,
     existingFiles: string[],
+    _conversationHistory?: Array<{ role: "user" | "assistant"; text: string }>,
   ): Promise<AgentResult> {
     // Simplified single-turn: ask Ollama what to do, parse response
     const systemPrompt = `You are a template file manager. Current files:\n${existingFiles.map(f => `- ${f}`).join("\n")}

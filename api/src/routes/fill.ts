@@ -44,8 +44,9 @@ fill.post("/", async (c) => {
   // Per-request Bedrock wrapper. Every Bedrock call by the router/filler
   // below will be tracked: pre-checked against the org balance, then
   // deducted + counted after the call returns. Mock and Ollama paths
-  // ignore the tracker entirely.
-  const requestId = crypto.randomUUID();
+  // ignore the tracker entirely. requestId comes from the global middleware
+  // so all log lines for this request share the same id.
+  const requestId = c.get("requestId");
   const tracker = new TrackedBedrock({
     userId: user.userId,
     orgId: user.orgId,
