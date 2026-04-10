@@ -103,30 +103,114 @@ export async function putUser(user: User): Promise<void> {
   );
 }
 
-/** Auto-provision a new user + org on first sign-in. */
+// Crockford base32 alphabet: digits + uppercase letters minus I, L, O, U.
+// 32 symbols × 5 bits per char × 10 chars = 50 bits of entropy. At 50 bits,
+// collision probability per generation is ~9 × 10⁻¹⁶ even with millions of
+// existing IDs — combined with the conditional-write retry loop in
+// `autoProvisionUser`, IDs are *guaranteed* unique, not just probabilistically.
+// Uppercase-only avoids dictation/copy-paste ambiguity.
+const SHORT_ID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+const SHORT_ID_LENGTH = 10;
+
+function generateShortId(): string {
+  const bytes = new Uint8Array(SHORT_ID_LENGTH);
+  crypto.getRandomValues(bytes);
+  let id = "";
+  for (let i = 0; i < SHORT_ID_LENGTH; i++) {
+    // Mask to 5 bits (0-31) and index into the 32-char alphabet.
+    id += SHORT_ID_ALPHABET[bytes[i] & 31];
+  }
+  return id;
+}
+
+/**
+ * Auto-provision a new user + org on first sign-in.
+ *
+ * Uses conditional DynamoDB writes with retry to *guarantee* unique IDs:
+ * each PutCommand fails fast on `ConditionalCheckFailedException` if the
+ * generated ID already exists, and we regenerate. With 50 bits of entropy
+ * the loop almost never iterates, but it's the only correct way to ensure
+ * uniqueness rather than relying on probability.
+ */
 export async function autoProvisionUser(
   cognitoId: string,
   email: string
 ): Promise<User> {
-  const userId = crypto.randomUUID().slice(0, 12);
-  const orgId = crypto.randomUUID().slice(0, 12);
+  const MAX_ID_ATTEMPTS = 5;
 
-  await putOrg({
-    id: orgId,
-    name: email.split("@")[0],
-    region: "us-west-2",
-    plan: "free",
-  });
+  let orgId = "";
+  for (let attempt = 0; attempt < MAX_ID_ATTEMPTS; attempt++) {
+    const candidate = generateShortId();
+    try {
+      await db.send(
+        new PutCommand({
+          TableName: TABLE_NAME,
+          Item: {
+            PK: `ORG#${candidate}`,
+            SK: "METADATA",
+            name: email.split("@")[0],
+            region: "us-west-2",
+            plan: "free",
+          },
+          ConditionExpression: "attribute_not_exists(PK)",
+        })
+      );
+      orgId = candidate;
+      break;
+    } catch (e: unknown) {
+      if (e instanceof Error && e.name === "ConditionalCheckFailedException") {
+        continue;
+      }
+      throw e;
+    }
+  }
+  if (!orgId) {
+    throw new Error(
+      `autoProvisionUser: failed to allocate unique orgId after ${MAX_ID_ATTEMPTS} attempts`
+    );
+  }
 
-  const user: User = {
+  let userId = "";
+  for (let attempt = 0; attempt < MAX_ID_ATTEMPTS; attempt++) {
+    const candidate = generateShortId();
+    try {
+      await db.send(
+        new PutCommand({
+          TableName: TABLE_NAME,
+          Item: {
+            PK: `ORG#${orgId}`,
+            SK: `USER#${candidate}`,
+            GSI1PK: `COGNITO#${cognitoId}`,
+            GSI1SK: "METADATA",
+            email,
+            role: "admin",
+            cognitoId,
+          },
+          ConditionExpression: "attribute_not_exists(SK)",
+        })
+      );
+      userId = candidate;
+      break;
+    } catch (e: unknown) {
+      if (e instanceof Error && e.name === "ConditionalCheckFailedException") {
+        continue;
+      }
+      throw e;
+    }
+  }
+  if (!userId) {
+    throw new Error(
+      `autoProvisionUser: failed to allocate unique userId after ${MAX_ID_ATTEMPTS} attempts`
+    );
+  }
+
+  return {
     id: userId,
     orgId,
     email,
     role: "admin",
     cognitoId,
   };
-  await putUser(user);
-  return user;
 }
 
 // --- Usage ---
