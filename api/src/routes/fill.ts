@@ -4,6 +4,7 @@ import { getAIRouter, getAIFiller } from "../services/ai/provider.js";
 import { lsRecursive, cat, findAuthor } from "../services/files/operations.js";
 import { checkFreeLimit, InsufficientBalanceError } from "../services/billing/tracker.js";
 import { TrackedBedrock } from "../services/billing/tracked-bedrock.js";
+import { sseLine } from "../lib/sse.js";
 import { config } from "../env.js";
 import type { AppEnv } from "../types.js";
 
@@ -88,7 +89,11 @@ fill.post("/", async (c) => {
 
     return stream(c, async (s) => {
       await s.write(
-        `data: ${JSON.stringify({ type: "meta", intent: route.intent, templatePath: route.templateId })}\n\n`,
+        sseLine({
+          type: "meta",
+          intent: route.intent,
+          templatePath: route.templateId,
+        }),
       );
 
       try {
@@ -99,19 +104,15 @@ fill.post("/", async (c) => {
           body.conversationHistory,
         )) {
           if (chunk.type === "text") {
-            await s.write(
-              `data: ${JSON.stringify({ type: "text", text: chunk.text })}\n\n`,
-            );
+            await s.write(sseLine({ type: "text", text: chunk.text }));
           } else if (chunk.type === "usage") {
-            await s.write(
-              `data: ${JSON.stringify({ type: "done", usage: chunk.data })}\n\n`,
-            );
+            await s.write(sseLine({ type: "done", usage: chunk.data }));
           }
         }
       } catch (err) {
         if (err instanceof InsufficientBalanceError) {
           await s.write(
-            `data: ${JSON.stringify({ type: "error", error: "Insufficient balance" })}\n\n`,
+            sseLine({ type: "error", error: "Insufficient balance" }),
           );
           return;
         }
@@ -138,7 +139,11 @@ fill.post("/", async (c) => {
 
     return stream(c, async (s) => {
       await s.write(
-        `data: ${JSON.stringify({ type: "meta", intent: "REFINE", templatePath: lastTemplatePath })}\n\n`,
+        sseLine({
+          type: "meta",
+          intent: "REFINE",
+          templatePath: lastTemplatePath,
+        }),
       );
 
       try {
@@ -149,19 +154,15 @@ fill.post("/", async (c) => {
           body.conversationHistory,
         )) {
           if (chunk.type === "text") {
-            await s.write(
-              `data: ${JSON.stringify({ type: "text", text: chunk.text })}\n\n`,
-            );
+            await s.write(sseLine({ type: "text", text: chunk.text }));
           } else if (chunk.type === "usage") {
-            await s.write(
-              `data: ${JSON.stringify({ type: "done", usage: chunk.data })}\n\n`,
-            );
+            await s.write(sseLine({ type: "done", usage: chunk.data }));
           }
         }
       } catch (err) {
         if (err instanceof InsufficientBalanceError) {
           await s.write(
-            `data: ${JSON.stringify({ type: "error", error: "Insufficient balance" })}\n\n`,
+            sseLine({ type: "error", error: "Insufficient balance" }),
           );
           return;
         }

@@ -5,8 +5,8 @@ import {
   type ToolResultContentBlock,
 } from "@aws-sdk/client-bedrock-runtime";
 import * as ops from "../files/operations.js";
-import type { AIAgent } from "./types.js";
-import type { AgentAction, AgentResult } from "../files/types.js";
+import type { AIAgent, AgentEvent } from "./types.js";
+import type { AgentAction } from "../files/types.js";
 import type { TrackedBedrock } from "../billing/tracked-bedrock.js";
 import { log, preview } from "../../lib/log.js";
 
@@ -146,12 +146,12 @@ async function executeTool(
 
 export function makeBedrockAgent(tracker: TrackedBedrock): AIAgent {
   return {
-    async executeFileOperations(
+    async *executeFileOperations(
       userId: string,
       message: string,
       existingFiles: string[],
       conversationHistory?: Array<{ role: "user" | "assistant"; text: string }>,
-    ): Promise<AgentResult> {
+    ): AsyncGenerator<AgentEvent> {
       const fileList = existingFiles.map((f) => `- ${f}`).join("\n");
 
       // Two important properties of this prompt:
@@ -231,11 +231,14 @@ Rules for your responses:
             actions: actions.map((a) => a.tool),
           });
 
-          return {
-            actions,
+          yield {
+            type: "complete",
             message: textParts.join("\n") || "Done.",
-            changedPaths: actions.map((a) => a.path).filter((p): p is string => !!p),
+            changedPaths: actions
+              .map((a) => a.path)
+              .filter((p): p is string => !!p),
           };
+          return;
         }
 
         // Execute tool calls
@@ -256,7 +259,19 @@ Rules for your responses:
               name,
               input as Record<string, string>,
             );
-            if (action) actions.push(action);
+            if (action) {
+              actions.push(action);
+              // Stream the action to the client right away. The frontend
+              // shows it under the in-progress assistant bubble so the
+              // user sees real progress instead of staring at a spinner
+              // while later rounds back off and retry.
+              yield {
+                type: "tool",
+                tool: action.tool,
+                path: action.path,
+                summary: action.summary,
+              };
+            }
 
             log.info("agent.tool.ok", {
               requestId: tracker.requestId,
@@ -312,10 +327,13 @@ Rules for your responses:
         actions: actions.map((a) => a.tool),
       });
 
-      return {
-        actions,
-        message: "Reached maximum operation limit. Some changes may be incomplete.",
-        changedPaths: actions.map((a) => a.path).filter((p): p is string => !!p),
+      yield {
+        type: "complete",
+        message:
+          "Reached maximum operation limit. Some changes may be incomplete.",
+        changedPaths: actions
+          .map((a) => a.path)
+          .filter((p): p is string => !!p),
       };
     },
   };

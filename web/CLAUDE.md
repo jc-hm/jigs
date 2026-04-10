@@ -11,8 +11,8 @@ Single-page app served from S3 via CloudFront. Communicates with the API via fet
 
 ## Key Patterns
 
-- **Streaming** — `src/lib/api.ts` exports `streamFill()` async generator. Reads SSE events from the fill endpoint. Components consume it with `for await`.
-- **File operations** — `src/lib/api.ts` exports `fileLs()`, `fileCat()`, `fileWrite()`, `fileRm()`, `fileMv()`, `fileMkdir()`, `runAgent()` for template file management.
+- **Streaming** — `src/lib/api.ts` exports `streamFill()` and `streamAgent()` async generators. Both go through the shared `readSSE<T>()` helper so the wire-format reader (response.ok check, decoder loop, `data: ` prefix parsing) lives in one place; each caller just passes its own event union as the type parameter. Components consume them with `for await`.
+- **File operations** — `src/lib/api.ts` exports `fileLs()`, `fileCat()`, `fileWrite()`, `fileRm()`, `fileMv()`, `fileMkdir()`, and `streamAgent()` for template file management. The agent endpoint streams `tool`/`retry`/`complete`/`error` events so the UI can show per-tool progress and retry-counter feedback as the agent loop runs (instead of blocking on a 60–120s response that CloudFront would kill).
 - **Voice input** — `src/components/VoiceInput.tsx` uses browser-native Web Speech API. Zero backend cost. Falls back to hidden if browser doesn't support it.
 - **Session state is client-side** — conversation history (`messages` array) is held in React state and sent with each request. No server-side session persistence.
 

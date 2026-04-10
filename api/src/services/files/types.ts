@@ -13,9 +13,3 @@ export interface AgentAction {
   path?: string;
   summary: string;
 }
-
-export interface AgentResult {
-  actions: AgentAction[];
-  message: string;
-  changedPaths: string[];
-}

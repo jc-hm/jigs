@@ -27,28 +27,17 @@ export async function apiFetch<T>(
   return res.json();
 }
 
-// --- Stream events (fill endpoint) ---
+// --- Shared SSE reader ---
 
-export interface StreamEvent {
-  type: "meta" | "text" | "done";
-  text?: string;
-  intent?: string;
-  templatePath?: string;
-  usage?: { inputTokens: number; outputTokens: number; modelId: string };
-}
-
-export async function* streamFill(body: {
-  message: string;
-  sessionContext?: string;
-  conversationHistory?: Array<{ role: "user" | "assistant"; text: string }>;
-}): AsyncGenerator<StreamEvent> {
-  const headers = await authHeaders();
-  const res = await fetch(`${API_BASE}/fill`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body),
-  });
-
+/**
+ * Read a `text/event-stream` response body and yield each parsed JSON
+ * event. Used by both `streamFill` and `streamAgent` so they share one
+ * wire-format reader; the event shape is parameterized via `<T>` so each
+ * caller stays strictly typed against its own event union.
+ *
+ * Server side, the matching helper is `api/src/lib/sse.ts#sseLine`.
+ */
+async function* readSSE<T>(res: Response): AsyncGenerator<T> {
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `API error: ${res.status}`);
@@ -71,14 +60,38 @@ export async function* streamFill(body: {
     for (const line of lines) {
       if (line.startsWith("data: ")) {
         try {
-          const event: StreamEvent = JSON.parse(line.slice(6));
-          yield event;
+          yield JSON.parse(line.slice(6)) as T;
         } catch {
           // skip malformed events
         }
       }
     }
   }
+}
+
+// --- Stream events (fill endpoint) ---
+
+export interface StreamEvent {
+  type: "meta" | "text" | "done";
+  text?: string;
+  intent?: string;
+  templatePath?: string;
+  usage?: { inputTokens: number; outputTokens: number; modelId: string };
+}
+
+export async function* streamFill(body: {
+  message: string;
+  sessionContext?: string;
+  conversationHistory?: Array<{ role: "user" | "assistant"; text: string }>;
+}): AsyncGenerator<StreamEvent> {
+  const headers = await authHeaders();
+  const res = await fetch(`${API_BASE}/fill`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  });
+
+  yield* readSSE<StreamEvent>(res);
 }
 
 // --- File operations (templates endpoint) ---
@@ -88,11 +101,24 @@ export interface FileEntry {
   isDirectory: boolean;
 }
 
-export interface AgentResult {
-  actions: Array<{ tool: string; path?: string; summary: string }>;
-  message: string;
-  changedPaths: string[];
-}
+// --- Agent stream events ---
+//
+// Mirrors `api/src/services/ai/types.ts#AgentEvent` exactly. The agent
+// endpoint streams these as SSE so the UI can show per-tool progress
+// (and retry attempts when Bedrock throttles), instead of waiting on a
+// single 60-120s JSON response that CloudFront kills mid-flight.
+export type AgentEvent =
+  | { type: "tool"; tool: string; path?: string; summary: string }
+  | {
+      type: "retry";
+      attempt: number;
+      maxAttempts: number;
+      errorName: string;
+      delayMs: number;
+      action: string;
+    }
+  | { type: "complete"; message: string; changedPaths: string[] }
+  | { type: "error"; message: string };
 
 export async function fileLs(path?: string): Promise<FileEntry[]> {
   const query = path ? `?path=${encodeURIComponent(path)}` : "";
@@ -151,12 +177,15 @@ export async function fileMkdir(path: string): Promise<void> {
   });
 }
 
-export async function runAgent(
-  message: string,
-  conversationHistory?: Array<{ role: "user" | "assistant"; text: string }>,
-): Promise<AgentResult> {
-  return apiFetch<AgentResult>("/templates/agent", {
+export async function* streamAgent(body: {
+  message: string;
+  conversationHistory?: Array<{ role: "user" | "assistant"; text: string }>;
+}): AsyncGenerator<AgentEvent> {
+  const headers = await authHeaders();
+  const res = await fetch(`${API_BASE}/templates/agent`, {
     method: "POST",
-    body: JSON.stringify({ message, conversationHistory }),
+    headers,
+    body: JSON.stringify(body),
   });
+  yield* readSSE<AgentEvent>(res);
 }

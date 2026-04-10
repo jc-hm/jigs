@@ -1,5 +1,11 @@
-import type { AIRouter, AIFiller, AIAgent, FillChunk, RouterResult } from "./types.js";
-import type { AgentResult } from "../files/types.js";
+import type {
+  AIRouter,
+  AIFiller,
+  AIAgent,
+  AgentEvent,
+  FillChunk,
+  RouterResult,
+} from "./types.js";
 
 export const mockRouter: AIRouter = {
   async classifyIntent(
@@ -51,17 +57,23 @@ MRI of the left knee was performed without intravenous contrast using standard p
 Normal MRI of the left knee. No acute abnormality.`;
 
 export const mockAgent: AIAgent = {
-  async executeFileOperations(
+  async *executeFileOperations(
     _userId: string,
     message: string,
     existingFiles: string[],
     _conversationHistory?: Array<{ role: "user" | "assistant"; text: string }>,
-  ): Promise<AgentResult> {
-    // Mock: create a new file based on message
-    return {
-      actions: [
-        { tool: "write_file", path: "mock-template", summary: `Created mock-template from: ${message.slice(0, 50)}` },
-      ],
+  ): AsyncGenerator<AgentEvent> {
+    // Mock: pretend to do one tool call, then complete. Yielding the
+    // tool event before complete lets the frontend exercise its progress
+    // rendering path against the mock provider too.
+    yield {
+      type: "tool",
+      tool: "write_file",
+      path: "mock-template",
+      summary: `Created mock-template from: ${message.slice(0, 50)}`,
+    };
+    yield {
+      type: "complete",
       message: `Processed your request. ${existingFiles.length} existing files found.`,
       changedPaths: ["mock-template"],
     };

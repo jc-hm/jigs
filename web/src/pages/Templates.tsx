@@ -15,17 +15,25 @@ import {
   fileRmDir,
   fileMv,
   fileMkdir,
-  runAgent,
-  type AgentResult,
+  streamAgent,
 } from "../lib/api";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
+// `inProgress` is true while we're still consuming the SSE stream for this
+// message — used to render the spinner inline instead of as a separate row.
+// `retryCount`/`retryMax` come from `retry` SSE events: when the Bedrock
+// wrapper hits a retryable error and is about to back off, the route relays
+// a `retry` event so we can surface "AI is busy — retry 3/5" in the chat,
+// rather than leaving the user staring at a generic spinner during the wait.
 interface ChatMessage {
   role: "user" | "assistant";
   text: string;
+  inProgress?: boolean;
+  retryCount?: number;
+  retryMax?: number;
 }
 
 interface TreeNode {
@@ -409,31 +417,95 @@ export function Templates() {
       setInput("");
       setError(undefined);
       setIsProcessing(true);
-      setMessages((prev) => [...prev, { role: "user", text: userMessage }]);
+
+      // Append the user's message AND a placeholder assistant row in one
+      // setState — the placeholder is what we mutate as `tool`/`retry`
+      // events stream in, so the user sees per-tool progress live instead
+      // of waiting on the final `complete` event.
+      const historyForAgent = messages;
+      setMessages((prev) => [
+        ...prev,
+        { role: "user", text: userMessage },
+        { role: "assistant", text: "", inProgress: true },
+      ]);
+
+      // Helper: update the in-progress assistant (last message) by index.
+      // We compute the index off the *current* prev inside the updater so
+      // we don't capture a stale length.
+      const updateLast = (mut: (m: ChatMessage) => ChatMessage) => {
+        setMessages((prev) => {
+          const idx = prev.length - 1;
+          if (idx < 0) return prev;
+          const next = prev.slice();
+          next[idx] = mut(next[idx]);
+          return next;
+        });
+      };
+
+      const toolLines: string[] = [];
+      const changedPaths: string[] = [];
+      let finalText = "";
+      let errored = false;
 
       try {
-        const result: AgentResult = await runAgent(userMessage, messages);
-        const actionSummaries = result.actions
-          .map((a) => `- ${a.summary}`)
-          .join("\n");
-        const assistantText = actionSummaries
-          ? `${result.message}\n\n${actionSummaries}`
-          : result.message;
-        setMessages((prev) => [
-          ...prev,
-          { role: "assistant", text: assistantText },
-        ]);
-        await refreshTree();
-        if (result.changedPaths.length > 0) {
-          await selectFile(result.changedPaths[0]);
+        for await (const event of streamAgent({
+          message: userMessage,
+          conversationHistory: historyForAgent,
+        })) {
+          if (event.type === "tool") {
+            toolLines.push(`- ${event.summary}`);
+            if (event.path) changedPaths.push(event.path);
+            updateLast((m) => ({ ...m, text: toolLines.join("\n") }));
+          } else if (event.type === "retry") {
+            // Bedrock just failed and is about to back off. Surface the
+            // counter so the user knows where the wait is coming from.
+            // `attempt` is 1-based and represents the attempt that JUST
+            // failed, so the next attempt is attempt+1.
+            updateLast((m) => ({
+              ...m,
+              retryCount: event.attempt,
+              retryMax: event.maxAttempts,
+            }));
+          } else if (event.type === "complete") {
+            finalText = toolLines.length
+              ? `${event.message}\n\n${toolLines.join("\n")}`
+              : event.message;
+            updateLast((m) => ({
+              ...m,
+              text: finalText,
+              inProgress: false,
+              retryCount: undefined,
+              retryMax: undefined,
+            }));
+          } else if (event.type === "error") {
+            errored = true;
+            updateLast((m) => ({
+              ...m,
+              text: `Error: ${event.message}`,
+              inProgress: false,
+              retryCount: undefined,
+              retryMax: undefined,
+            }));
+            setError(event.message);
+          }
+        }
+
+        if (!errored) {
+          await refreshTree();
+          if (changedPaths.length > 0) {
+            await selectFile(changedPaths[0]);
+          }
         }
       } catch (err) {
         const msg =
           err instanceof Error ? err.message : "Something went wrong";
-        setMessages((prev) => [
-          ...prev,
-          { role: "assistant", text: `Error: ${msg}` },
-        ]);
+        updateLast((m) => ({
+          ...m,
+          text: `Error: ${msg}`,
+          inProgress: false,
+          retryCount: undefined,
+          retryMax: undefined,
+        }));
         setError(msg);
       } finally {
         setIsProcessing(false);
@@ -668,17 +740,28 @@ export function Templates() {
               >
                 {msg.role === "user" ? "You" : "Agent"}
               </span>
-              <p className="whitespace-pre-wrap break-words">{msg.text}</p>
+              {msg.text && (
+                <p className="whitespace-pre-wrap break-words">{msg.text}</p>
+              )}
+              {/* In-progress indicator: shown until the `complete` event
+                  finalizes this message. We render it inline (not as a
+                  separate row) so streamed tool summaries and the spinner
+                  share the same chat bubble. */}
+              {msg.inProgress && !msg.retryCount && (
+                <p className="text-gray-400 animate-pulse mt-0.5">
+                  {msg.text ? "Working..." : "Thinking..."}
+                </p>
+              )}
+              {/* Retry counter: shown only when the wrapper is currently
+                  backing off. The amber color makes it visually distinct
+                  from a hard error and from the normal spinner. */}
+              {msg.inProgress && msg.retryCount && msg.retryMax && (
+                <p className="text-amber-600 mt-0.5">
+                  AI is busy — retry {msg.retryCount}/{msg.retryMax}…
+                </p>
+              )}
             </div>
           ))}
-          {isProcessing && (
-            <div className="text-sm text-gray-400">
-              <span className="inline-block text-xs font-medium mb-0.5">
-                Agent
-              </span>
-              <p className="animate-pulse">Working...</p>
-            </div>
-          )}
           <div ref={chatEndRef} />
         </div>
 

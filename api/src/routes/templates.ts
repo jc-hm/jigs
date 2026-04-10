@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { stream } from "hono/streaming";
 import {
   ls,
   lsRecursive,
@@ -11,6 +12,8 @@ import {
 import { getAIAgent } from "../services/ai/provider.js";
 import { TrackedBedrock } from "../services/billing/tracked-bedrock.js";
 import { InsufficientBalanceError } from "../services/billing/tracker.js";
+import { sseLine } from "../lib/sse.js";
+import { log } from "../lib/log.js";
 import type { AppEnv } from "../types.js";
 
 const templates = new Hono<AppEnv>();
@@ -80,7 +83,15 @@ templates.post("/mkdir", async (c) => {
   return c.json({ message: "ok", path: body.path });
 });
 
-// AI agent: natural language file operations
+// AI agent: natural language file operations.
+//
+// Streams progress as Server-Sent Events. Each tool call the agent
+// performs becomes a `tool` event the moment it lands; the loop ends
+// with a `complete` event carrying the final summary and changedPaths.
+// We stream rather than block on a single JSON response because the
+// loop can take 60-120s under Bedrock throttling, and CloudFront's
+// origin response timeout (~30s for non-streaming) was killing the
+// connection mid-loop even when Lambda ran to completion.
 templates.post("/agent", async (c) => {
   const user = c.get("user");
   const body = await c.req.json<{
@@ -90,33 +101,69 @@ templates.post("/agent", async (c) => {
   if (!body.message?.trim()) return c.json({ error: "message is required" }, 400);
 
   const allFiles = await lsRecursive(user.userId);
-
-  // Per-request Bedrock wrapper. The agent loop can run up to 10 Sonnet
-  // rounds; each round is tracked individually with its agentRound number.
-  // requestId comes from the global middleware so all logs for this request
-  // (router, agent rounds, errors) share the same id.
   const requestId = c.get("requestId");
-  const tracker = new TrackedBedrock({
-    userId: user.userId,
-    orgId: user.orgId,
-    requestId,
-  });
 
-  try {
-    const agent = await getAIAgent(tracker);
-    const result = await agent.executeFileOperations(
-      user.userId,
-      body.message,
-      allFiles,
-      body.conversationHistory,
+  return stream(c, async (s) => {
+    // Per-request Bedrock wrapper. The agent loop can run up to 10 Sonnet
+    // rounds; each round is tracked individually with its agentRound number.
+    // requestId comes from the global middleware so all logs for this
+    // request (router, agent rounds, errors) share the same id.
+    //
+    // onRetry is wired here (inside the stream callback) so the writer
+    // `s` is in scope: every retry attempt the wrapper makes is forwarded
+    // to the frontend in real time as a `retry` SSE event, no queueing
+    // needed because the agent loop awaits converse() which awaits this
+    // callback — JS single-threaded means writes can't interleave.
+    const tracker = new TrackedBedrock(
+      { userId: user.userId, orgId: user.orgId, requestId },
+      {
+        onRetry: async (info) => {
+          await s.write(
+            sseLine({
+              type: "retry",
+              attempt: info.attempt,
+              maxAttempts: info.maxAttempts,
+              errorName: info.errorName,
+              delayMs: info.delayMs,
+              action: info.action,
+            }),
+          );
+        },
+      },
     );
-    return c.json(result);
-  } catch (err) {
-    if (err instanceof InsufficientBalanceError) {
-      return c.json({ error: "Insufficient balance. Please top up." }, 402);
+
+    const agent = await getAIAgent(tracker);
+
+    try {
+      for await (const event of agent.executeFileOperations(
+        user.userId,
+        body.message,
+        allFiles,
+        body.conversationHistory,
+      )) {
+        await s.write(sseLine(event));
+      }
+    } catch (err) {
+      // Mid-stream failure: we already returned 200 with SSE headers,
+      // so we can't change the HTTP status. Best we can do is emit a
+      // final `error` event the frontend renders as a chat error, then
+      // log it loudly so investigation is the same as any other 500.
+      if (err instanceof InsufficientBalanceError) {
+        await s.write(
+          sseLine({ type: "error", message: "Insufficient balance. Please top up." }),
+        );
+        return;
+      }
+      log.error("agent.stream.failed", err, {
+        requestId,
+        userId: user.userId,
+        orgId: user.orgId,
+      });
+      const message =
+        err instanceof Error ? err.message : "Internal server error";
+      await s.write(sseLine({ type: "error", message }));
     }
-    throw err;
-  }
+  });
 });
 
 export { templates };

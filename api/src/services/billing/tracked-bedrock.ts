@@ -29,24 +29,62 @@ export interface CallMeta {
   agentRound?: number;
 }
 
+/**
+ * Info passed to the optional `onRetry` callback whenever a Bedrock call
+ * is about to back off and retry. The route layer relays this to the
+ * frontend as an SSE `retry` event so the user can see WHY a request is
+ * slow ("retry 3/5 — throttled") instead of staring at a generic spinner.
+ */
+export interface RetryInfo {
+  attempt: number;       // the attempt number that just FAILED (1-based)
+  maxAttempts: number;
+  errorName: string;
+  delayMs: number;       // wall-clock wait until the next attempt
+  action: UsageAction;
+}
+
+export type RetryCallback = (info: RetryInfo) => Promise<void> | void;
+
+export interface TrackedBedrockOptions {
+  /** Called once per retry attempt (NOT on the initial attempt). */
+  onRetry?: RetryCallback;
+}
+
+// Errors we know are safe to retry on. Matches the set in app.ts that
+// the global error handler also recognises — kept in sync intentionally.
+const RETRYABLE_BEDROCK_ERRORS = new Set([
+  "ThrottlingException",
+  "ServiceUnavailableException",
+  "ModelStreamErrorException",
+  "ModelTimeoutException",
+]);
+
+const MAX_RETRY_ATTEMPTS = 5; // 1 initial + 4 retries
+const MAX_BACKOFF_MS = 10_000;
+
+/** Exponential backoff with ±20% jitter, capped at MAX_BACKOFF_MS. */
+function backoffMs(attempt: number): number {
+  const base = Math.min(1000 * 2 ** (attempt - 1), MAX_BACKOFF_MS);
+  const jitter = base * 0.2 * (Math.random() * 2 - 1);
+  return Math.round(base + jitter);
+}
+
 // Single shared SDK client. The wrapper is per-request, but the underlying
 // client (with its connection pool, credential cache, etc.) is reused.
 //
-// Retry config: Bedrock cross-region inference profiles (us.anthropic.*)
-// share capacity across customers and apply coarse burst limits — three
-// sequential agent rounds in ~7s can trip ThrottlingException even at very
-// low absolute usage. The default SDK config (maxAttempts=3, standard mode)
-// gives up too quickly. We bump to 8 attempts in adaptive mode, which adds
-// client-side rate limiting on top of exponential backoff so subsequent
-// calls in the same loop slow themselves down preemptively.
+// Retry config: SDK retries are DISABLED (maxAttempts=1) because we
+// implement our own retry loop in `retryableSend` below. The reason is
+// visibility: the SDK's adaptive retry hides everything inside a single
+// `client.send()`, so the user sees a long opaque wait. Our manual loop
+// fires `onRetry` callbacks the route relays as SSE events, so the
+// frontend can show "AI is busy — retry 3/5".
 let sharedClient: BedrockRuntimeClient | null = null;
 function getSharedClient(): BedrockRuntimeClient {
   if (!sharedClient) {
     const baseConfig = config.isLocal ? { region: "us-west-2" } : {};
     sharedClient = new BedrockRuntimeClient({
       ...baseConfig,
-      maxAttempts: 8,
-      retryMode: "adaptive",
+      maxAttempts: 1,
     });
   }
   return sharedClient;
@@ -113,6 +151,7 @@ function responsePreview(response: ConverseCommandOutput): string {
 export class TrackedBedrock {
   constructor(
     private readonly ctx: CallContext,
+    private readonly options: TrackedBedrockOptions = {},
     private readonly client: BedrockRuntimeClient = getSharedClient(),
   ) {}
 
@@ -127,6 +166,64 @@ export class TrackedBedrock {
     return this.ctx.orgId;
   }
 
+  /**
+   * Manual retry loop around `client.send()`. Distinguished from SDK
+   * retry by the `onRetry` callback, which lets the route layer relay
+   * progress to the frontend as the loop runs. Only the call setup is
+   * retried — once a streaming response has started, errors mid-stream
+   * surface to the caller as-is.
+   */
+  private async retryableSend<T>(
+    sendFn: () => Promise<T>,
+    meta: CallMeta,
+  ): Promise<T> {
+    let lastErr: unknown;
+    for (let attempt = 1; attempt <= MAX_RETRY_ATTEMPTS; attempt++) {
+      try {
+        return await sendFn();
+      } catch (err) {
+        lastErr = err;
+        const retryable =
+          err instanceof Error && RETRYABLE_BEDROCK_ERRORS.has(err.name);
+        if (!retryable || attempt >= MAX_RETRY_ATTEMPTS) throw err;
+
+        const delayMs = backoffMs(attempt);
+        log.warn("bedrock.retry", {
+          requestId: this.ctx.requestId,
+          orgId: this.ctx.orgId,
+          action: meta.action,
+          agentRound: meta.agentRound,
+          attempt,
+          maxAttempts: MAX_RETRY_ATTEMPTS,
+          errorName: (err as Error).name,
+          delayMs,
+        });
+
+        if (this.options.onRetry) {
+          try {
+            await this.options.onRetry({
+              attempt,
+              maxAttempts: MAX_RETRY_ATTEMPTS,
+              errorName: (err as Error).name,
+              delayMs,
+              action: meta.action,
+            });
+          } catch (cbErr) {
+            // The onRetry callback writes to an SSE stream — if that
+            // write fails, log it but don't abandon the retry.
+            log.error("bedrock.retry.callback_failed", cbErr, {
+              requestId: this.ctx.requestId,
+              action: meta.action,
+            });
+          }
+        }
+
+        await new Promise((r) => setTimeout(r, delayMs));
+      }
+    }
+    throw lastErr;
+  }
+
   async converse(
     input: ConverseCommandInput,
     meta: CallMeta,
@@ -135,7 +232,10 @@ export class TrackedBedrock {
     const start = Date.now();
     let response: ConverseCommandOutput;
     try {
-      response = await this.client.send(new ConverseCommand(input));
+      response = await this.retryableSend(
+        () => this.client.send(new ConverseCommand(input)),
+        meta,
+      );
     } catch (err) {
       // Bedrock errors (throttling, validation, model errors) were
       // previously bubbling up unlogged and surfacing as silent 500s. Log
@@ -211,7 +311,10 @@ export class TrackedBedrock {
     const start = Date.now();
     let response;
     try {
-      response = await this.client.send(new ConverseStreamCommand(input));
+      response = await this.retryableSend(
+        () => this.client.send(new ConverseStreamCommand(input)),
+        meta,
+      );
     } catch (err) {
       log.error("bedrock.stream.failed", err, {
         requestId: this.ctx.requestId,

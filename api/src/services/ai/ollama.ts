@@ -1,5 +1,11 @@
-import type { AIRouter, AIFiller, AIAgent, FillChunk, RouterResult } from "./types.js";
-import type { AgentResult } from "../files/types.js";
+import type {
+  AIRouter,
+  AIFiller,
+  AIAgent,
+  AgentEvent,
+  FillChunk,
+  RouterResult,
+} from "./types.js";
 import { buildRouterPrompt } from "./router.js";
 import { config } from "../../env.js";
 
@@ -71,13 +77,15 @@ export const ollamaRouter: AIRouter = {
 };
 
 export const ollamaAgent: AIAgent = {
-  async executeFileOperations(
+  async *executeFileOperations(
     _userId: string,
     message: string,
     existingFiles: string[],
     _conversationHistory?: Array<{ role: "user" | "assistant"; text: string }>,
-  ): Promise<AgentResult> {
-    // Simplified single-turn: ask Ollama what to do, parse response
+  ): AsyncGenerator<AgentEvent> {
+    // Ollama doesn't do real Bedrock-style tool use here — we just ask
+    // for a JSON blob and emit one tool event per action plus a final
+    // complete. Same surface as the bedrock impl, lower fidelity inside.
     const systemPrompt = `You are a template file manager. Current files:\n${existingFiles.map(f => `- ${f}`).join("\n")}
 
 Respond with JSON: { "actions": [{"tool": "write_file", "path": "...", "content": "..."}], "message": "what you did" }`;
@@ -94,18 +102,30 @@ Respond with JSON: { "actions": [{"tool": "write_file", "path": "...", "content"
 
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      return { actions: [], message: "Could not process request", changedPaths: [] };
+      yield { type: "complete", message: "Could not process request", changedPaths: [] };
+      return;
     }
 
     try {
       const parsed = JSON.parse(jsonMatch[0]);
-      return {
-        actions: parsed.actions || [],
+      const actions: Array<{ tool?: string; path?: string }> = parsed.actions || [];
+      const changedPaths: string[] = [];
+      for (const a of actions) {
+        if (a.path) changedPaths.push(a.path);
+        yield {
+          type: "tool",
+          tool: a.tool ?? "unknown",
+          path: a.path,
+          summary: a.path ? `Wrote ${a.path}` : "Action",
+        };
+      }
+      yield {
+        type: "complete",
         message: parsed.message || "Done",
-        changedPaths: (parsed.actions || []).map((a: { path?: string }) => a.path).filter(Boolean),
+        changedPaths,
       };
     } catch {
-      return { actions: [], message: "Could not parse response", changedPaths: [] };
+      yield { type: "complete", message: "Could not parse response", changedPaths: [] };
     }
   },
 };
