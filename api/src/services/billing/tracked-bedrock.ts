@@ -31,12 +31,23 @@ export interface CallMeta {
 
 // Single shared SDK client. The wrapper is per-request, but the underlying
 // client (with its connection pool, credential cache, etc.) is reused.
+//
+// Retry config: Bedrock cross-region inference profiles (us.anthropic.*)
+// share capacity across customers and apply coarse burst limits — three
+// sequential agent rounds in ~7s can trip ThrottlingException even at very
+// low absolute usage. The default SDK config (maxAttempts=3, standard mode)
+// gives up too quickly. We bump to 8 attempts in adaptive mode, which adds
+// client-side rate limiting on top of exponential backoff so subsequent
+// calls in the same loop slow themselves down preemptively.
 let sharedClient: BedrockRuntimeClient | null = null;
 function getSharedClient(): BedrockRuntimeClient {
   if (!sharedClient) {
-    sharedClient = new BedrockRuntimeClient(
-      config.isLocal ? { region: "us-west-2" } : {},
-    );
+    const baseConfig = config.isLocal ? { region: "us-west-2" } : {};
+    sharedClient = new BedrockRuntimeClient({
+      ...baseConfig,
+      maxAttempts: 8,
+      retryMode: "adaptive",
+    });
   }
   return sharedClient;
 }

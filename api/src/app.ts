@@ -52,14 +52,45 @@ app.route("/api/v1/billing", billing);
 // staging 500s were silent in CloudWatch. This handler captures the full
 // error with route + user context so every uncaught exception is greppable
 // by requestId.
+//
+// Bedrock retryable errors (ThrottlingException, ServiceUnavailableException,
+// ModelStreamErrorException) are translated to 503 with a Retry-After hint
+// so the frontend can show "AI is busy, try again in a moment" rather than
+// a scary generic error. Note: the SDK retries internally up to maxAttempts
+// (configured to 8 in adaptive mode in tracked-bedrock.ts), so by the time
+// these surface here, retries have already been exhausted.
+const RETRYABLE_BEDROCK_ERRORS = new Set([
+  "ThrottlingException",
+  "ServiceUnavailableException",
+  "ModelStreamErrorException",
+  "ModelTimeoutException",
+]);
+
 app.onError((err, c) => {
   const user = c.get("user");
+  const isRetryable =
+    err instanceof Error && RETRYABLE_BEDROCK_ERRORS.has(err.name);
+
   log.error("request.unhandled_error", err, {
     requestId: c.get("requestId"),
     route: `${c.req.method} ${c.req.path}`,
     userId: user?.userId,
     orgId: user?.orgId,
+    retryable: isRetryable,
   });
+
+  if (isRetryable) {
+    c.header("Retry-After", "5");
+    return c.json(
+      {
+        error:
+          "The AI service is temporarily busy. Please try again in a few seconds.",
+        retryable: true,
+      },
+      503,
+    );
+  }
+
   return c.json({ error: "Internal server error" }, 500);
 });
 
