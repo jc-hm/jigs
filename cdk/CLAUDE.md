@@ -27,11 +27,16 @@ AWS CDK (TypeScript) managing all cloud resources. Single stack deployed per sta
 
 ## Deploy
 
+CDK commands must run from the `cdk/` directory (that's where `cdk.json` lives, which tells the CDK CLI how to invoke the app). Running `cdk` from the repo root fails with `--app is required`. Use the pnpm scripts so the working directory is correct automatically:
+
 ```bash
-pnpm --filter api build                  # Bundle API first
-cd cdk
-cdk synth --context stage=staging        # Validate template
-cdk deploy --context stage=staging       # Deploy staging
-cdk diff --context stage=prod            # Preview prod changes
-cdk deploy --context stage=prod          # Deploy production
+pnpm --filter api build                                              # Bundle API first (Lambda code comes from ../api/dist)
+pnpm --filter web build                                              # Build SPA (web bucket deploy reads from ../web/dist)
+pnpm --filter @jigs/cdk deploy:staging                               # Deploy staging (us-west-2)
+pnpm --filter @jigs/cdk deploy:staging -- --require-approval never   # Same, non-interactive
+pnpm --filter @jigs/cdk diff:staging                                 # Preview staging changes
+pnpm --filter @jigs/cdk deploy:prod                                  # Deploy production (eu-central-1)
+pnpm --filter @jigs/cdk diff:prod                                    # Preview prod changes
 ```
+
+If you really need raw `cdk` (e.g. `cdk bootstrap`, `cdk destroy`), `cd cdk` first.

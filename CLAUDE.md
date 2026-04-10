@@ -48,8 +48,8 @@ pnpm test                            # Unit tests (no Docker)
 pnpm test:integration                # Integration tests (needs Docker)
 pnpm test:staging                    # Smoke tests against staging (needs TARGET_URL, AUTH_TOKEN)
 pnpm test:prod                       # Smoke tests against prod
-cdk deploy --context stage=staging   # Deploy staging (us-west-2)
-cdk deploy --context stage=prod      # Deploy production (eu-central-1)
+pnpm --filter @jigs/cdk deploy:staging   # Deploy staging (us-west-2)
+pnpm --filter @jigs/cdk deploy:prod      # Deploy production (eu-central-1)
 ```
 
 ## Conventions
