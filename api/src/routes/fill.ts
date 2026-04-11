@@ -1,10 +1,10 @@
 import { Hono } from "hono";
-import { stream } from "hono/streaming";
+import { streamSSE } from "hono/streaming";
 import { getAIRouter, getAIFiller } from "../services/ai/provider.js";
 import { lsRecursive, cat, findAuthor } from "../services/files/operations.js";
 import { checkFreeLimit, InsufficientBalanceError } from "../services/billing/tracker.js";
 import { TrackedBedrock } from "../services/billing/tracked-bedrock.js";
-import { sseLine } from "../lib/sse.js";
+import { writeEvent } from "../lib/sse.js";
 import { config } from "../env.js";
 import type { AppEnv } from "../types.js";
 
@@ -87,14 +87,12 @@ fill.post("/", async (c) => {
       findAuthor(user.userId, route.templateId),
     ]);
 
-    return stream(c, async (s) => {
-      await s.write(
-        sseLine({
-          type: "meta",
-          intent: route.intent,
-          templatePath: route.templateId,
-        }),
-      );
+    return streamSSE(c, async (s) => {
+      await writeEvent(s, {
+        type: "meta",
+        intent: route.intent,
+        templatePath: route.templateId,
+      });
 
       try {
         for await (const chunk of aiFiller.streamFillTemplate(
@@ -104,16 +102,14 @@ fill.post("/", async (c) => {
           body.conversationHistory,
         )) {
           if (chunk.type === "text") {
-            await s.write(sseLine({ type: "text", text: chunk.text }));
+            await writeEvent(s, { type: "text", text: chunk.text });
           } else if (chunk.type === "usage") {
-            await s.write(sseLine({ type: "done", usage: chunk.data }));
+            await writeEvent(s, { type: "done", usage: chunk.data });
           }
         }
       } catch (err) {
         if (err instanceof InsufficientBalanceError) {
-          await s.write(
-            sseLine({ type: "error", error: "Insufficient balance" }),
-          );
+          await writeEvent(s, { type: "error", error: "Insufficient balance" });
           return;
         }
         throw err;
@@ -137,14 +133,12 @@ fill.post("/", async (c) => {
       findAuthor(user.userId, lastTemplatePath),
     ]);
 
-    return stream(c, async (s) => {
-      await s.write(
-        sseLine({
-          type: "meta",
-          intent: "REFINE",
-          templatePath: lastTemplatePath,
-        }),
-      );
+    return streamSSE(c, async (s) => {
+      await writeEvent(s, {
+        type: "meta",
+        intent: "REFINE",
+        templatePath: lastTemplatePath,
+      });
 
       try {
         for await (const chunk of aiFiller.streamFillTemplate(
@@ -154,16 +148,14 @@ fill.post("/", async (c) => {
           body.conversationHistory,
         )) {
           if (chunk.type === "text") {
-            await s.write(sseLine({ type: "text", text: chunk.text }));
+            await writeEvent(s, { type: "text", text: chunk.text });
           } else if (chunk.type === "usage") {
-            await s.write(sseLine({ type: "done", usage: chunk.data }));
+            await writeEvent(s, { type: "done", usage: chunk.data });
           }
         }
       } catch (err) {
         if (err instanceof InsufficientBalanceError) {
-          await s.write(
-            sseLine({ type: "error", error: "Insufficient balance" }),
-          );
+          await writeEvent(s, { type: "error", error: "Insufficient balance" });
           return;
         }
         throw err;

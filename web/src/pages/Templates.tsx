@@ -444,8 +444,6 @@ export function Templates() {
 
       const toolLines: string[] = [];
       const changedPaths: string[] = [];
-      let finalText = "";
-      let errored = false;
 
       try {
         for await (const event of streamAgent({
@@ -455,7 +453,14 @@ export function Templates() {
           if (event.type === "tool") {
             toolLines.push(`- ${event.summary}`);
             if (event.path) changedPaths.push(event.path);
-            updateLast((m) => ({ ...m, text: toolLines.join("\n") }));
+            // A tool event means a round just completed, so any retry
+            // counter from a prior round's backoffs should be cleared.
+            updateLast((m) => ({
+              ...m,
+              text: toolLines.join("\n"),
+              retryCount: undefined,
+              retryMax: undefined,
+            }));
           } else if (event.type === "retry") {
             // Bedrock just failed and is about to back off. Surface the
             // counter so the user knows where the wait is coming from.
@@ -467,7 +472,7 @@ export function Templates() {
               retryMax: event.maxAttempts,
             }));
           } else if (event.type === "complete") {
-            finalText = toolLines.length
+            const finalText = toolLines.length
               ? `${event.message}\n\n${toolLines.join("\n")}`
               : event.message;
             updateLast((m) => ({
@@ -478,10 +483,16 @@ export function Templates() {
               retryMax: undefined,
             }));
           } else if (event.type === "error") {
-            errored = true;
+            // Preserve tool summaries if any files were written before the
+            // error — the agent may have made partial progress (e.g. wrote
+            // 3 templates then hit ThrottlingException on the 4th). Wiping
+            // the text here would hide that progress from the user.
+            const errorText = toolLines.length
+              ? `${toolLines.join("\n")}\n\nError: ${event.message}`
+              : `Error: ${event.message}`;
             updateLast((m) => ({
               ...m,
-              text: `Error: ${event.message}`,
+              text: errorText,
               inProgress: false,
               retryCount: undefined,
               retryMax: undefined,
@@ -489,25 +500,35 @@ export function Templates() {
             setError(event.message);
           }
         }
-
-        if (!errored) {
-          await refreshTree();
-          if (changedPaths.length > 0) {
-            await selectFile(changedPaths[0]);
-          }
-        }
       } catch (err) {
         const msg =
           err instanceof Error ? err.message : "Something went wrong";
+        const errorText = toolLines.length
+          ? `${toolLines.join("\n")}\n\nError: ${msg}`
+          : `Error: ${msg}`;
         updateLast((m) => ({
           ...m,
-          text: `Error: ${msg}`,
+          text: errorText,
           inProgress: false,
           retryCount: undefined,
           retryMax: undefined,
         }));
         setError(msg);
       } finally {
+        // Always refresh the tree after the stream ends — even on error.
+        // The agent may have made partial progress (written some files
+        // before hitting a throttle), and the file tree should reflect
+        // what's actually in S3 regardless of whether the loop finished
+        // cleanly. Refresh is best-effort: a failure here shouldn't mask
+        // the original error the user already sees.
+        try {
+          await refreshTree();
+          if (changedPaths.length > 0) {
+            await selectFile(changedPaths[0]);
+          }
+        } catch (refreshErr) {
+          console.warn("post-agent refresh failed", refreshErr);
+        }
         setIsProcessing(false);
         inputRef.current?.focus();
         setTimeout(

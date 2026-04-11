@@ -35,7 +35,22 @@ export async function apiFetch<T>(
  * wire-format reader; the event shape is parameterized via `<T>` so each
  * caller stays strictly typed against its own event union.
  *
- * Server side, the matching helper is `api/src/lib/sse.ts#sseLine`.
+ * Server side, the matching helper is `api/src/lib/sse.ts#sseLine` (which
+ * now delegates to Hono's `streamSSE.writeSSE`).
+ *
+ * Parsing strategy: split on the SSE event boundary (`\n\n`), NOT on
+ * single `\n`, then walk each event block's lines to collect `data:`
+ * fields. This is the SSE spec-correct approach and it tolerates:
+ *   - multi-line `data:` payloads (joined with `\n`)
+ *   - leading `:` comments (keep-alive pings)
+ *   - optional space after `data:` (per spec)
+ *   - both `\n\n` and `\r\n\r\n` separators
+ *
+ * Parse failures are logged via `console.warn` (not silently swallowed)
+ * so any wire-format issue shows up in the browser console immediately
+ * instead of silently dropping events — which was previously making it
+ * impossible to tell the difference between "no events arriving" and
+ * "events arriving but failing to decode".
  */
 async function* readSSE<T>(res: Response): AsyncGenerator<T> {
   if (!res.ok) {
@@ -49,23 +64,55 @@ async function* readSSE<T>(res: Response): AsyncGenerator<T> {
   const decoder = new TextDecoder();
   let buffer = "";
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
+  const flush = function* (): Generator<T> {
+    // Normalize CRLF to LF so a single \n\n check works either way.
+    let idx;
+    while ((idx = buffer.indexOf("\n\n")) !== -1) {
+      const block = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 2);
 
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() || "";
-
-    for (const line of lines) {
-      if (line.startsWith("data: ")) {
-        try {
-          yield JSON.parse(line.slice(6)) as T;
-        } catch {
-          // skip malformed events
+      // Collect all `data:` lines within this event block. Per the SSE
+      // spec, multi-line data values are joined with `\n`.
+      const dataParts: string[] = [];
+      for (const rawLine of block.split("\n")) {
+        const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+        if (line.startsWith(":")) continue; // comment / keep-alive
+        if (line.startsWith("data:")) {
+          // Strip `data:` and an optional single leading space.
+          dataParts.push(line.slice(line[5] === " " ? 6 : 5));
         }
+        // other SSE fields (event, id, retry) are ignored for our use case
+      }
+      if (dataParts.length === 0) continue;
+
+      const dataStr = dataParts.join("\n");
+      try {
+        yield JSON.parse(dataStr) as T;
+      } catch (err) {
+        console.warn("readSSE: failed to parse event", {
+          dataPreview: dataStr.slice(0, 200),
+          err,
+        });
       }
     }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      // Flush anything buffered — and if there's a final event without
+      // a trailing `\n\n`, append one so the event boundary check finds it.
+      buffer += decoder.decode();
+      if (buffer.length > 0 && !buffer.endsWith("\n\n")) buffer += "\n\n";
+      yield* flush();
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+    // Some servers / proxies emit \r\n\r\n — normalize in the buffer so
+    // our indexOf("\n\n") check catches both.
+    if (buffer.includes("\r\n")) buffer = buffer.replace(/\r\n/g, "\n");
+    yield* flush();
   }
 }
 

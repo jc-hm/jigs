@@ -1,13 +1,22 @@
+import type { SSEStreamingApi } from "hono/streaming";
+
 /**
- * Format a value as a single SSE `data:` line. Used by every streaming
- * endpoint (fill, agent) so they share one wire-format primitive.
+ * Write a single SSE event to the Hono `streamSSE` writer.
  *
- * The protocol is intentionally minimal: one JSON event per line, with
- * the trailing `\n\n` separator that browsers' EventSource (and our own
- * client-side `readSSE` reader) expect. Discriminated-union event types
- * live with the service that emits them (FillChunk in ai/types.ts,
- * AgentEvent likewise) — this helper stays event-agnostic.
+ * Both streaming endpoints (fill, agent) go through here so the wire
+ * format stays consistent: one JSON-encoded event per `data:` field,
+ * framed by Hono's `writeSSE` (which handles the trailing `\n\n` and
+ * sets `Content-Type: text/event-stream` on the response). The client
+ * counterpart is `web/src/lib/api.ts#readSSE`.
+ *
+ * Passing `streamSSE.writeSSE` its own `{data: string}` object is what
+ * gets us the proper headers and keeps CloudFront / browsers from
+ * buffering or mis-decoding the stream — which was the failure mode
+ * before we adopted the helper.
  */
-export function sseLine<T>(event: T): string {
-  return `data: ${JSON.stringify(event)}\n\n`;
+export async function writeEvent<T>(
+  s: SSEStreamingApi,
+  event: T,
+): Promise<void> {
+  await s.writeSSE({ data: JSON.stringify(event) });
 }

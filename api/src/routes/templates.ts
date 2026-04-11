@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { stream } from "hono/streaming";
+import { streamSSE } from "hono/streaming";
 import {
   ls,
   lsRecursive,
@@ -12,7 +12,7 @@ import {
 import { getAIAgent } from "../services/ai/provider.js";
 import { TrackedBedrock } from "../services/billing/tracked-bedrock.js";
 import { InsufficientBalanceError } from "../services/billing/tracker.js";
-import { sseLine } from "../lib/sse.js";
+import { writeEvent } from "../lib/sse.js";
 import { log } from "../lib/log.js";
 import type { AppEnv } from "../types.js";
 
@@ -103,7 +103,7 @@ templates.post("/agent", async (c) => {
   const allFiles = await lsRecursive(user.userId);
   const requestId = c.get("requestId");
 
-  return stream(c, async (s) => {
+  return streamSSE(c, async (s) => {
     // Per-request Bedrock wrapper. The agent loop can run up to 10 Sonnet
     // rounds; each round is tracked individually with its agentRound number.
     // requestId comes from the global middleware so all logs for this
@@ -118,16 +118,14 @@ templates.post("/agent", async (c) => {
       { userId: user.userId, orgId: user.orgId, requestId },
       {
         onRetry: async (info) => {
-          await s.write(
-            sseLine({
-              type: "retry",
-              attempt: info.attempt,
-              maxAttempts: info.maxAttempts,
-              errorName: info.errorName,
-              delayMs: info.delayMs,
-              action: info.action,
-            }),
-          );
+          await writeEvent(s, {
+            type: "retry",
+            attempt: info.attempt,
+            maxAttempts: info.maxAttempts,
+            errorName: info.errorName,
+            delayMs: info.delayMs,
+            action: info.action,
+          });
         },
       },
     );
@@ -141,7 +139,7 @@ templates.post("/agent", async (c) => {
         allFiles,
         body.conversationHistory,
       )) {
-        await s.write(sseLine(event));
+        await writeEvent(s, event);
       }
     } catch (err) {
       // Mid-stream failure: we already returned 200 with SSE headers,
@@ -149,9 +147,10 @@ templates.post("/agent", async (c) => {
       // final `error` event the frontend renders as a chat error, then
       // log it loudly so investigation is the same as any other 500.
       if (err instanceof InsufficientBalanceError) {
-        await s.write(
-          sseLine({ type: "error", message: "Insufficient balance. Please top up." }),
-        );
+        await writeEvent(s, {
+          type: "error",
+          message: "Insufficient balance. Please top up.",
+        });
         return;
       }
       log.error("agent.stream.failed", err, {
@@ -161,7 +160,7 @@ templates.post("/agent", async (c) => {
       });
       const message =
         err instanceof Error ? err.message : "Internal server error";
-      await s.write(sseLine({ type: "error", message }));
+      await writeEvent(s, { type: "error", message });
     }
   });
 });

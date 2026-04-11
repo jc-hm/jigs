@@ -59,10 +59,22 @@ const RETRYABLE_BEDROCK_ERRORS = new Set([
   "ModelTimeoutException",
 ]);
 
-const MAX_RETRY_ATTEMPTS = 5; // 1 initial + 4 retries
-const MAX_BACKOFF_MS = 10_000;
+// 1 initial + 9 retries. Previously 5; bumped after a 30-template agent
+// request on staging exhausted the budget on Round 4 (`6586f4f7-…`).
+// Each round of the agent loop is a single Bedrock call, so a 10-round
+// agent with 30 templates makes 10 Sonnet calls in a tight burst that
+// can easily trip the cross-region inference profile's short-window
+// throttle. More attempts with a longer backoff tail gives us a better
+// chance of riding out the burst instead of failing the whole job.
+const MAX_RETRY_ATTEMPTS = 10;
+const MAX_BACKOFF_MS = 20_000;
 
-/** Exponential backoff with ±20% jitter, capped at MAX_BACKOFF_MS. */
+/**
+ * Exponential backoff with ±20% jitter, capped at MAX_BACKOFF_MS.
+ * Worst-case total wait across 9 retries with full cap ≈ 145s, which is
+ * well under Lambda's 15-minute Function URL timeout and (now that the
+ * response streams) also invisible to CloudFront's origin timeout.
+ */
 function backoffMs(attempt: number): number {
   const base = Math.min(1000 * 2 ** (attempt - 1), MAX_BACKOFF_MS);
   const jitter = base * 0.2 * (Math.random() * 2 - 1);
