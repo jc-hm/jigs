@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, type FormEvent } from "react"
 import { streamFill } from "../lib/api";
 import { StreamingOutput } from "../components/StreamingOutput";
 import { VoiceInput } from "../components/VoiceInput";
+import { CopyButton } from "../components/CopyButton";
 import {
   generateSessionId,
   listSessions,
@@ -25,11 +26,28 @@ export function Fill() {
   const [error, setError] = useState<string>();
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+  const chatEndRef = useRef<HTMLDivElement>(null);
 
   // Load session list on mount
   useEffect(() => {
     listSessions().then(setSessions);
   }, []);
+
+  // Auto-scroll the conversation to the bottom as new messages land and as
+  // the currently streaming response grows. Guarded by a "near-bottom" check
+  // so a user who has scrolled up to re-read an earlier interaction isn't
+  // yanked back down on every streamed token. Mirrors the same pattern used
+  // in Templates.tsx for the agent chat column.
+  useEffect(() => {
+    const el = chatScrollRef.current;
+    if (!el) return;
+    const nearBottom =
+      el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    if (nearBottom) {
+      chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages, output]);
 
   // Save session after messages change (debounced by the streaming flow)
   const saveRef = useRef<Session | null>(null);
@@ -200,7 +218,7 @@ export function Fill() {
       {/* Main chat area */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Output area */}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div ref={chatScrollRef} className="flex-1 overflow-y-auto p-6">
           <div className="max-w-3xl mx-auto">
             {!output && !isStreaming && messages.length === 0 && (
               <div className="text-center text-gray-400 mt-20">
@@ -214,27 +232,55 @@ export function Fill() {
               </div>
             )}
 
-            {/* Prior messages */}
+            {/* Prior messages, grouped into interaction pairs so each pair
+                gets a single top-left "copy full interaction" button on hover
+                and the assistant code block gets a fixed top-right "copy
+                response only" button. Matches the Claude Code chat pattern. */}
             {messages.length > 0 && (
               <div className="space-y-4 mb-6">
-                {messages.map((m, i) => (
-                  <div
-                    key={i}
-                    className={`text-sm ${
-                      m.role === "user"
-                        ? "text-gray-500 italic"
-                        : "text-gray-800"
-                    }`}
-                  >
-                    {m.role === "user" ? (
-                      <p>{m.text}</p>
-                    ) : (
-                      <div className="bg-white border border-gray-200 rounded-lg p-4 whitespace-pre-wrap font-mono text-xs">
-                        {m.text}
-                      </div>
-                    )}
-                  </div>
-                ))}
+                {groupIntoPairs(messages).map((pair) => {
+                  const userText = pair.user?.text ?? "";
+                  const assistantText = pair.assistant?.text ?? "";
+                  const fullInteraction = pair.user && pair.assistant
+                    ? `> ${userText}\n\n${assistantText}`
+                    : assistantText || userText;
+                  return (
+                    <div
+                      key={pair.key}
+                      className="relative group space-y-2"
+                    >
+                      {/* Hover-only top-left button: copies the whole pair.
+                          Sits above the user line so it doesn't overlap the
+                          code block's own top-right button. */}
+                      {pair.user && pair.assistant && (
+                        <CopyButton
+                          text={fullInteraction}
+                          label="Copy full interaction"
+                          className="absolute -top-1 -left-1 z-10 opacity-0 group-hover:opacity-100"
+                        />
+                      )}
+                      {pair.user && (
+                        <div className="text-sm text-gray-500 italic">
+                          <p>{pair.user.text}</p>
+                        </div>
+                      )}
+                      {pair.assistant && (
+                        <div className="relative text-sm text-gray-800">
+                          {/* Fixed top-right button: copies the response text
+                              alone (the "code block" copy). */}
+                          <CopyButton
+                            text={pair.assistant.text}
+                            label="Copy response"
+                            className="absolute top-2 right-2 z-10"
+                          />
+                          <div className="bg-white border border-gray-200 rounded-lg p-4 pr-12 whitespace-pre-wrap font-mono text-xs">
+                            {pair.assistant.text}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
 
@@ -251,6 +297,7 @@ export function Fill() {
                 {error}
               </div>
             )}
+            <div ref={chatEndRef} />
           </div>
         </div>
 
@@ -283,6 +330,32 @@ export function Fill() {
       </div>
     </div>
   );
+}
+
+// Walks the linear messages array and groups each user message with its
+// following assistant response into a single "interaction pair". Orphan
+// messages (either role missing — e.g. a user prompt still mid-stream, or
+// an assistant error without a matching user prompt) are emitted as a
+// half-filled pair so they still render but without a full-interaction
+// copy button.
+function groupIntoPairs(
+  messages: SessionMessage[],
+): Array<{ key: number; user?: SessionMessage; assistant?: SessionMessage }> {
+  const out: Array<{
+    key: number;
+    user?: SessionMessage;
+    assistant?: SessionMessage;
+  }> = [];
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (m.role === "user" && messages[i + 1]?.role === "assistant") {
+      out.push({ key: i, user: m, assistant: messages[i + 1] });
+      i++;
+    } else {
+      out.push({ key: i, [m.role]: m });
+    }
+  }
+  return out;
 }
 
 function formatDate(ms: number): string {

@@ -93,6 +93,7 @@ export function Templates() {
   const [error, setError] = useState<string>();
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
 
   // --- Resizable panels ---
   const [leftWidth, setLeftWidth] = useState(280);
@@ -137,6 +138,21 @@ export function Templates() {
     window.addEventListener("click", close);
     return () => window.removeEventListener("click", close);
   }, []);
+
+  // Auto-scroll the agent chat to the bottom as new tool events, text, or
+  // retry updates land. Guarded by a "near-bottom" check so users who have
+  // scrolled up to re-read an earlier tool call aren't yanked back down on
+  // every streamed update. The existing finally-block scroll at the end of
+  // handleSend still fires as a final "land on the bottom" nudge.
+  useEffect(() => {
+    const el = chatScrollRef.current;
+    if (!el) return;
+    const nearBottom =
+      el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    if (nearBottom) {
+      chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages]);
 
   // -------------------------------------------------------------------------
   // File selection (with dirty guard)
@@ -771,7 +787,10 @@ export function Templates() {
           <h2 className="text-sm font-semibold text-gray-700">AI Agent</h2>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-3 space-y-3">
+        <div
+          ref={chatScrollRef}
+          className="flex-1 overflow-y-auto p-3 space-y-3"
+        >
           {messages.length === 0 && (
             <div className="text-center text-gray-400 text-sm mt-8 px-2">
               <p className="mb-2 font-medium text-gray-500">

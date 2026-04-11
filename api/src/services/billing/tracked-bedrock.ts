@@ -71,12 +71,23 @@ const MAX_BACKOFF_MS = 20_000;
 
 /**
  * Exponential backoff with ±20% jitter, capped at MAX_BACKOFF_MS.
- * Worst-case total wait across 9 retries with full cap ≈ 145s, which is
- * well under Lambda's 15-minute Function URL timeout and (now that the
- * response streams) also invisible to CloudFront's origin timeout.
+ *
+ * Base 2s × 3^(attempt-1) so the ramp is:
+ *   attempt 1 → 2s
+ *   attempt 2 → 6s
+ *   attempt 3 → 18s
+ *   attempt 4+ → 20s (cap)
+ *
+ * Previously the ramp started at 1s and doubled (1, 2, 4, 8, 16, 20…),
+ * which meant users watching the UI routinely saw 4-5 retry counters tick
+ * by during a single throttling incident. The steeper ramp gives Bedrock
+ * more headroom between each attempt, so in practice most throttling
+ * windows clear by retry 2-3 and the user sees fewer "AI is busy" events.
+ * Total budget across 10 attempts ≈ 146s, same order of magnitude as
+ * before — well under Lambda's 15-minute ceiling.
  */
 function backoffMs(attempt: number): number {
-  const base = Math.min(1000 * 2 ** (attempt - 1), MAX_BACKOFF_MS);
+  const base = Math.min(2000 * 3 ** (attempt - 1), MAX_BACKOFF_MS);
   const jitter = base * 0.2 * (Math.random() * 2 - 1);
   return Math.round(base + jitter);
 }

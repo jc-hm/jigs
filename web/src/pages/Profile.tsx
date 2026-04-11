@@ -4,6 +4,12 @@ import { apiFetch } from "../lib/api";
 interface Usage {
   daily: { reportCount: number };
   monthly: { reportCount: number; totalCostUsd: number };
+  balance: {
+    balanceUsd: number;
+    topUpsUsd: number;
+    spentUsd: number;
+    reportsLifetime: number;
+  };
 }
 
 export function Profile() {
@@ -29,25 +35,25 @@ export function Profile() {
       {usage && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="bg-white border border-gray-200 rounded-lg p-4">
-            <div className="text-sm text-gray-500">Today</div>
+            <div className="text-sm text-gray-500">Balance</div>
             <div className="text-2xl font-semibold text-gray-800">
-              {usage.daily.reportCount} / 1
+              ${usage.balance.balanceUsd.toFixed(2)}
             </div>
-            <div className="text-xs text-gray-400">reports (free tier)</div>
+            <div className="text-xs text-gray-400">remaining credit</div>
           </div>
           <div className="bg-white border border-gray-200 rounded-lg p-4">
-            <div className="text-sm text-gray-500">This Month</div>
+            <div className="text-sm text-gray-500">Total Reports</div>
             <div className="text-2xl font-semibold text-gray-800">
-              {usage.monthly.reportCount}
+              {usage.balance.reportsLifetime}
             </div>
-            <div className="text-xs text-gray-400">reports</div>
+            <div className="text-xs text-gray-400">lifetime</div>
           </div>
           <div className="bg-white border border-gray-200 rounded-lg p-4">
-            <div className="text-sm text-gray-500">Cost</div>
+            <div className="text-sm text-gray-500">Total Cost</div>
             <div className="text-2xl font-semibold text-gray-800">
-              ${usage.monthly.totalCostUsd.toFixed(2)}
+              ${usage.balance.spentUsd.toFixed(2)}
             </div>
-            <div className="text-xs text-gray-400">this month (AI inference)</div>
+            <div className="text-xs text-gray-400">lifetime AI inference</div>
           </div>
         </div>
       )}

@@ -1,6 +1,15 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { app } from "../app.js";
 import { seedTestData, injectMockAI, resetMockAI } from "../../test/helpers/setup.js";
+import { parseSSE } from "../../test/helpers/sse.js";
+
+type FillEvent = {
+  type: "meta" | "text" | "done";
+  text?: string;
+  intent?: string;
+  templatePath?: string;
+  usage?: { inputTokens: number; outputTokens: number; modelId: string };
+};
 
 describe("POST /api/v1/fill", () => {
   beforeAll(async () => {
@@ -25,10 +34,7 @@ describe("POST /api/v1/fill", () => {
     expect(res.status).toBe(200);
 
     const text = await res.text();
-    const events = text
-      .split("\n\n")
-      .filter(Boolean)
-      .map((e) => JSON.parse(e.replace("data: ", "")));
+    const events = parseSSE<FillEvent>(text);
 
     // First event: meta
     expect(events[0].type).toBe("meta");
@@ -38,7 +44,7 @@ describe("POST /api/v1/fill", () => {
     // Last event: done with usage
     const last = events[events.length - 1];
     expect(last.type).toBe("done");
-    expect(last.usage.inputTokens).toBeGreaterThan(0);
+    expect(last.usage?.inputTokens).toBeGreaterThan(0);
 
     // Middle events: text chunks
     const textEvents = events.filter((e) => e.type === "text");
@@ -74,10 +80,7 @@ describe("POST /api/v1/fill", () => {
     expect(res.status).toBe(200);
 
     const text = await res.text();
-    const events = text
-      .split("\n\n")
-      .filter(Boolean)
-      .map((e) => JSON.parse(e.replace("data: ", "")));
+    const events = parseSSE<FillEvent>(text);
 
     expect(events[0].type).toBe("meta");
     expect(events[0].intent).toBe("REFINE");

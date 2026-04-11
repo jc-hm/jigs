@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { app } from "../app.js";
 import { seedTestData, injectMockAI, resetMockAI } from "../../test/helpers/setup.js";
+import { parseSSE } from "../../test/helpers/sse.js";
+import type { AgentEvent } from "../services/ai/types.js";
 
 describe("Template file API", () => {
   beforeAll(async () => {
@@ -179,18 +181,27 @@ describe("Template file API", () => {
   });
 
   describe("POST /api/v1/templates/agent", () => {
-    it("returns agent result with actions", async () => {
+    it("streams tool and complete events from the agent loop", async () => {
       const res = await app.request("/api/v1/templates/agent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: "create a new brain MRI template" }),
       });
       expect(res.status).toBe(200);
-      const body = await res.json();
-      expect(body.actions).toBeInstanceOf(Array);
-      expect(body.actions.length).toBeGreaterThan(0);
-      expect(body.message).toBeDefined();
-      expect(body.changedPaths).toBeInstanceOf(Array);
+
+      const text = await res.text();
+      const events = parseSSE<AgentEvent>(text);
+
+      // At least one tool call landed and a terminal complete event arrived.
+      const toolEvents = events.filter((e) => e.type === "tool");
+      expect(toolEvents.length).toBeGreaterThan(0);
+
+      const complete = events.find((e) => e.type === "complete");
+      expect(complete).toBeDefined();
+      if (complete?.type === "complete") {
+        expect(complete.message).toBeDefined();
+        expect(complete.changedPaths).toBeInstanceOf(Array);
+      }
     });
 
     it("returns 400 without message", async () => {

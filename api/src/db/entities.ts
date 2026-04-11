@@ -123,6 +123,11 @@ function generateShortId(): string {
   return id;
 }
 
+// New orgs receive this much free credit on signup so they can use the
+// product without wiring Stripe first. Retire / lower once payments are
+// live and the free-tier daily counter is removed.
+const STARTER_CREDIT_USD = 10;
+
 /**
  * Auto-provision a new user + org on first sign-in.
  *
@@ -131,6 +136,12 @@ function generateShortId(): string {
  * generated ID already exists, and we regenerate. With 50 bits of entropy
  * the loop almost never iterates, but it's the only correct way to ensure
  * uniqueness rather than relying on probability.
+ *
+ * After the org + user rows land, the new org is credited with
+ * STARTER_CREDIT_USD so the balance gate (`assertBalance`) will pass on
+ * their very first Bedrock call. If the credit write fails we log and
+ * continue — provisioning the user is more important than the grant, and
+ * a support topup can fix the grant later.
  */
 export async function autoProvisionUser(
   cognitoId: string,
@@ -202,6 +213,15 @@ export async function autoProvisionUser(
     throw new Error(
       `autoProvisionUser: failed to allocate unique userId after ${MAX_ID_ATTEMPTS} attempts`
     );
+  }
+
+  // Best-effort starter credit. Imported locally to avoid a forward-reference
+  // headache — addBalance is defined further down in this same file.
+  try {
+    await addBalance(orgId, STARTER_CREDIT_USD);
+  } catch {
+    // Swallow: the user still exists and can be topped up manually.
+    // TODO: structured log once the api/src/lib/log helper is importable here.
   }
 
   return {
@@ -345,10 +365,15 @@ export async function getMonthlyUsage(pk: string): Promise<MonthlyUsage> {
 
 // --- Org balance (prepaid credits) ---
 
+// The BALANCE record doubles as the "org-lifetime stats" row: balance +
+// lifetime topups + lifetime spend + lifetime report count. These are all
+// cheap counters updated via atomic ADD, so the single-item design keeps
+// reads to one GET.
 export interface OrgBalance {
   balanceUsd: number;
   topUpsUsd: number;
   spentUsd: number;
+  reportsLifetime: number;
 }
 
 export async function getOrgBalance(orgId: string): Promise<OrgBalance> {
@@ -362,6 +387,7 @@ export async function getOrgBalance(orgId: string): Promise<OrgBalance> {
     balanceUsd: res.Item?.balanceUsd ?? 0,
     topUpsUsd: res.Item?.topUpsUsd ?? 0,
     spentUsd: res.Item?.spentUsd ?? 0,
+    reportsLifetime: res.Item?.reportsLifetime ?? 0,
   };
 }
 
@@ -383,19 +409,34 @@ export async function addBalance(orgId: string, amountUsd: number): Promise<void
 
 /**
  * Debit the org's balance after a successful Bedrock call. Atomic ADD with
- * a negative value, plus a positive `spentUsd` accumulator. Allowed to drift
- * slightly negative (one call's worth) since the pre-call check is only
- * `balance > 0`.
+ * a negative value on `balanceUsd`, a positive value on `spentUsd`, and an
+ * optional `reportsLifetime` bump so the BALANCE row also tracks "total
+ * reports produced by this org" as a lifetime counter (used by the Profile
+ * page). `reportDelta` is expected to be 0 for router/agent_round calls
+ * and 1 for fill/refine, but the signature stays numeric in case a single
+ * call ever represents multiple reports.
+ *
+ * The balance is allowed to drift slightly negative (one call's worth)
+ * since the pre-call check is only `balance > 0`.
  */
-export async function deductBalance(orgId: string, amountUsd: number): Promise<void> {
+export async function deductBalance(
+  orgId: string,
+  amountUsd: number,
+  reportDelta: number = 0,
+): Promise<void> {
   if (amountUsd < 0) throw new Error("deductBalance amount must be non-negative");
-  if (amountUsd === 0) return;
+  if (amountUsd === 0 && reportDelta === 0) return;
   await db.send(
     new UpdateCommand({
       TableName: TABLE_NAME,
       Key: { PK: `ORG#${orgId}`, SK: "BALANCE" },
-      UpdateExpression: "ADD balanceUsd :neg, spentUsd :pos",
-      ExpressionAttributeValues: { ":neg": -amountUsd, ":pos": amountUsd },
+      UpdateExpression:
+        "ADD balanceUsd :neg, spentUsd :pos, reportsLifetime :rep",
+      ExpressionAttributeValues: {
+        ":neg": -amountUsd,
+        ":pos": amountUsd,
+        ":rep": reportDelta,
+      },
     })
   );
 }

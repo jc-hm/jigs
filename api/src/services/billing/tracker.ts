@@ -97,8 +97,13 @@ export async function trackAndDeduct(call: TrackedCall): Promise<void> {
   );
   const chargedCost = bedrockCost * SPREAD;
 
+  // fill/refine calls produce a user-visible report; router and agent_round
+  // calls do not. Only the former bump the BALANCE row's `reportsLifetime`
+  // counter (surfaced on the Profile page as "Total Reports").
+  const isReport = call.action === "fill" || call.action === "refine";
+
   await Promise.all([
-    deductBalance(call.orgId, chargedCost),
+    deductBalance(call.orgId, chargedCost, isReport ? 1 : 0),
     incrementUsageCounters(call.userId, call.orgId, {
       action: call.action,
       costUsd: chargedCost,
