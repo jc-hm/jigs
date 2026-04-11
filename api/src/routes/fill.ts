@@ -4,7 +4,7 @@ import { getAIRouter, getAIFiller } from "../services/ai/provider.js";
 import { lsRecursive, cat, findAuthor } from "../services/files/operations.js";
 import { checkFreeLimit, InsufficientBalanceError } from "../services/billing/tracker.js";
 import { TrackedBedrock } from "../services/billing/tracked-bedrock.js";
-import { writeEvent } from "../lib/sse.js";
+import { writeEvent, writeComment, startHeartbeat } from "../lib/sse.js";
 import { config } from "../env.js";
 import type { AppEnv } from "../types.js";
 
@@ -88,13 +88,19 @@ fill.post("/", async (c) => {
     ]);
 
     return streamSSE(c, async (s) => {
-      await writeEvent(s, {
-        type: "meta",
-        intent: route.intent,
-        templatePath: route.templateId,
-      });
-
+      // Initial comment + heartbeat so CloudFront's 30s origin-response
+      // timeout doesn't fire while Sonnet warms up on big templates. See
+      // sse.ts#startHeartbeat. The meta event below also counts as first
+      // byte, but the explicit comment is cheap insurance.
+      await writeComment(s, "start");
+      const stopHeartbeat = startHeartbeat(s);
       try {
+        await writeEvent(s, {
+          type: "meta",
+          intent: route.intent,
+          templatePath: route.templateId,
+        });
+
         for await (const chunk of aiFiller.streamFillTemplate(
           authorContent || "",
           templateContent,
@@ -113,6 +119,8 @@ fill.post("/", async (c) => {
           return;
         }
         throw err;
+      } finally {
+        stopHeartbeat();
       }
     });
   }
@@ -134,13 +142,16 @@ fill.post("/", async (c) => {
     ]);
 
     return streamSSE(c, async (s) => {
-      await writeEvent(s, {
-        type: "meta",
-        intent: "REFINE",
-        templatePath: lastTemplatePath,
-      });
-
+      // Same initial-comment + heartbeat as the NEW_FILL/RE_SELECT branch.
+      await writeComment(s, "start");
+      const stopHeartbeat = startHeartbeat(s);
       try {
+        await writeEvent(s, {
+          type: "meta",
+          intent: "REFINE",
+          templatePath: lastTemplatePath,
+        });
+
         for await (const chunk of aiFiller.streamFillTemplate(
           authorContent || "",
           templateContent,
@@ -159,6 +170,8 @@ fill.post("/", async (c) => {
           return;
         }
         throw err;
+      } finally {
+        stopHeartbeat();
       }
     });
   }

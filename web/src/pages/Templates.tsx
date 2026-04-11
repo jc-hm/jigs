@@ -443,7 +443,18 @@ export function Templates() {
       };
 
       const toolLines: string[] = [];
-      const changedPaths: string[] = [];
+      // Paths of files (not folders) touched by the agent. Used to pick
+      // which file to open in the editor after the run. `create_folder`
+      // actions also produce `tool` events with a path, but that path is
+      // a folder — passing it to `selectFile` would try to `cat` a folder
+      // key and fail with "Could not open X", so we filter them out here.
+      const changedFilePaths: string[] = [];
+      // Set to true when we observe a terminal event (`complete` or
+      // `error`). If the stream ends without ever setting this, the
+      // request was interrupted (Lambda timeout, network drop, etc.) and
+      // the finally block shows a warning instead of leaving the UI in
+      // an in-progress state forever.
+      let sawTerminalEvent = false;
 
       try {
         for await (const event of streamAgent({
@@ -452,7 +463,9 @@ export function Templates() {
         })) {
           if (event.type === "tool") {
             toolLines.push(`- ${event.summary}`);
-            if (event.path) changedPaths.push(event.path);
+            if (event.path && event.tool !== "create_folder") {
+              changedFilePaths.push(event.path);
+            }
             // A tool event means a round just completed, so any retry
             // counter from a prior round's backoffs should be cleared.
             updateLast((m) => ({
@@ -472,6 +485,7 @@ export function Templates() {
               retryMax: event.maxAttempts,
             }));
           } else if (event.type === "complete") {
+            sawTerminalEvent = true;
             const finalText = toolLines.length
               ? `${event.message}\n\n${toolLines.join("\n")}`
               : event.message;
@@ -483,6 +497,7 @@ export function Templates() {
               retryMax: undefined,
             }));
           } else if (event.type === "error") {
+            sawTerminalEvent = true;
             // Preserve tool summaries if any files were written before the
             // error — the agent may have made partial progress (e.g. wrote
             // 3 templates then hit ThrottlingException on the 4th). Wiping
@@ -501,6 +516,7 @@ export function Templates() {
           }
         }
       } catch (err) {
+        sawTerminalEvent = true;
         const msg =
           err instanceof Error ? err.message : "Something went wrong";
         const errorText = toolLines.length
@@ -515,6 +531,26 @@ export function Templates() {
         }));
         setError(msg);
       } finally {
+        // If the stream ended without a terminal event, the request was
+        // interrupted mid-flight (Lambda hit its timeout, network dropped,
+        // etc.). Without this, the assistant message would stay stuck
+        // with inProgress=true forever, making the UI look hung.
+        if (!sawTerminalEvent) {
+          const interruptedMessage =
+            "Request interrupted before completion. Some changes may be partial — the file tree reflects what actually landed.";
+          const interruptedText = toolLines.length
+            ? `${toolLines.join("\n")}\n\n${interruptedMessage}`
+            : interruptedMessage;
+          updateLast((m) => ({
+            ...m,
+            text: interruptedText,
+            inProgress: false,
+            retryCount: undefined,
+            retryMax: undefined,
+          }));
+          setError(interruptedMessage);
+        }
+
         // Always refresh the tree after the stream ends — even on error.
         // The agent may have made partial progress (written some files
         // before hitting a throttle), and the file tree should reflect
@@ -523,8 +559,8 @@ export function Templates() {
         // the original error the user already sees.
         try {
           await refreshTree();
-          if (changedPaths.length > 0) {
-            await selectFile(changedPaths[0]);
+          if (changedFilePaths.length > 0) {
+            await selectFile(changedFilePaths[0]);
           }
         } catch (refreshErr) {
           console.warn("post-agent refresh failed", refreshErr);

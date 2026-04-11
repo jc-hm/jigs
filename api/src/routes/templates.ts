@@ -12,7 +12,7 @@ import {
 import { getAIAgent } from "../services/ai/provider.js";
 import { TrackedBedrock } from "../services/billing/tracked-bedrock.js";
 import { InsufficientBalanceError } from "../services/billing/tracker.js";
-import { writeEvent } from "../lib/sse.js";
+import { writeEvent, writeComment, startHeartbeat } from "../lib/sse.js";
 import { log } from "../lib/log.js";
 import type { AppEnv } from "../types.js";
 
@@ -104,7 +104,15 @@ templates.post("/agent", async (c) => {
   const requestId = c.get("requestId");
 
   return streamSSE(c, async (s) => {
-    // Per-request Bedrock wrapper. The agent loop can run up to 10 Sonnet
+    // Flush an initial byte to the wire BEFORE touching Bedrock.
+    // CloudFront's default origin-response timeout is 30s; a single
+    // 20-template agent round can run 40-60s, and without this comment
+    // CloudFront would return 504 before any `tool` event is emitted.
+    // See sse.ts#startHeartbeat for the longer explanation.
+    await writeComment(s, "start");
+    const stopHeartbeat = startHeartbeat(s);
+
+    // Per-request Bedrock wrapper. The agent loop can run up to 25 Sonnet
     // rounds; each round is tracked individually with its agentRound number.
     // requestId comes from the global middleware so all logs for this
     // request (router, agent rounds, errors) share the same id.
@@ -161,6 +169,8 @@ templates.post("/agent", async (c) => {
       const message =
         err instanceof Error ? err.message : "Internal server error";
       await writeEvent(s, { type: "error", message });
+    } finally {
+      stopHeartbeat();
     }
   });
 });

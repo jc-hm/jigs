@@ -104,7 +104,13 @@ export class JigsStack extends cdk.Stack {
       handler: "index.handler",
       code: lambda.Code.fromAsset("../api/dist"),
       memorySize: 512,
-      timeout: cdk.Duration.minutes(5),
+      // 15 min = Lambda's hard ceiling. Only the agent endpoint runs
+      // long — a bulk rename of ~30 templates can take 5-8 minutes of
+      // wall clock once Bedrock throttling kicks in on later rounds.
+      // Lambda billing is per-execution-ms, not per-configured-timeout,
+      // so the only cost of this bump is that a stuck request will take
+      // longer to surface as a failure.
+      timeout: cdk.Duration.minutes(15),
       architecture: lambda.Architecture.ARM_64,
       environment: {
         STAGE: stage,

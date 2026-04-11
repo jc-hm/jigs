@@ -24,6 +24,11 @@ Ideas and improvements to address later. Not prioritized — just captured so th
 - **Agent operation preview/confirm**: Show a diff view before the AI agent applies changes, so users can review before committing.
 - **Template catalog file**: A hidden file (e.g., `_catalog.json` above `/templates/`) with `{ path, title, description }` entries for richer routing. Rebuilt when files change. Currently v0 routes by filename only — this would improve routing quality for ambiguous names.
 
+## Templates Agent UX
+
+- **Model `AgentAction` kind explicitly**: The agent currently emits a single flat list of "things touched" (path + tool name). The frontend has to filter by tool name (`tool !== "create_folder"`) to avoid passing folder paths to `selectFile`, which is fragile — any new folder-producing tool silently breaks it. Cleaner: tag each `AgentAction` with `kind: "file" | "folder"` (or split into two arrays at the source) so the frontend can ask for "files only" without enumerating tools. Only worth doing if a second folder-producing tool appears.
+- **Graceful Lambda-timeout warning from the backend**: The agent route relies on the frontend's "stream ended without a terminal event" detection to recover from Lambda being killed at 15 min. That's correct as a floor (it also catches network drops, client sleep, etc.), but the backend *could* do better for the specific Lambda-timeout case: poll `getRemainingTimeInMillis()` and emit a proper `error` SSE event at ~14:30 with a message like "hit maximum execution time, some changes may be partial." Gives the user a clearer explanation than the generic "interrupted" message. Additive to the frontend detection, not a replacement.
+
 ## Template Matching Persona
 
 - Allow users to provide optional direction (in AUTHOR.md or a separate config) about how templates should be matched — e.g., "match by imaging modality and body part" or "match by document type and jurisdiction". This guidance would be passed to the router (Haiku) prompt.
