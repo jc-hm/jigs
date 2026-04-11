@@ -18,15 +18,28 @@ type AuthState = "loading" | "authenticated" | "unauthenticated" | "error";
 
 const VALID_PAGES: Page[] = ["fill", "templates", "profile"];
 
-function getPageFromHash(): Page {
-  const hash = window.location.hash.replace("#", "");
-  return VALID_PAGES.includes(hash as Page) ? (hash as Page) : "fill";
+// Parse `#page/subpath/more` into a page + optional sub-path. Used by the
+// Templates page so `#templates/neuro/brain-mri.md` reloads land on the
+// same file (and, via the matched-template link on Fill, lets the user
+// jump straight from a fill response to editing the template that
+// produced it). Only the first segment is validated as a Page — anything
+// after the first slash is forwarded as-is.
+function parseHash(): { page: Page; subpath: string } {
+  const raw = window.location.hash.replace(/^#/, "");
+  const slash = raw.indexOf("/");
+  const first = slash === -1 ? raw : raw.slice(0, slash);
+  const subpath = slash === -1 ? "" : raw.slice(slash + 1);
+  const page: Page = VALID_PAGES.includes(first as Page)
+    ? (first as Page)
+    : "fill";
+  return { page, subpath };
 }
 
 function App() {
   const [authState, setAuthState] = useState<AuthState>("loading");
   const [authError, setAuthError] = useState("");
-  const [page, setPage] = useState<Page>(getPageFromHash);
+  const [route, setRoute] = useState(parseHash);
+  const { page } = route;
 
   // Check auth on mount
   useEffect(() => {
@@ -54,14 +67,23 @@ function App() {
 
   // Hash routing
   useEffect(() => {
-    const onHashChange = () => setPage(getPageFromHash());
+    const onHashChange = () => setRoute(parseHash());
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
 
-  const navigate = useCallback((p: Page) => {
-    window.location.hash = p;
-  }, []);
+  // Clicking a top-nav item while already on that page is a no-op so
+  // it doesn't clobber any `#templates/foo.md` sub-path the user has
+  // accumulated by opening a file — the intuition is "clicking
+  // Templates shouldn't lose your place if you're already there."
+  // Genuine cross-page navigation still works normally.
+  const navigate = useCallback(
+    (p: Page) => {
+      if (p === route.page) return;
+      window.location.hash = p;
+    },
+    [route.page]
+  );
 
   const handleSignedIn = useCallback(() => {
     setAuthState("authenticated");
@@ -141,7 +163,9 @@ function App() {
       {/* Main content */}
       <main className="flex-1 overflow-hidden">
         {page === "fill" && <Fill />}
-        {page === "templates" && <Templates />}
+        {page === "templates" && (
+          <Templates initialPath={route.subpath || undefined} />
+        )}
         {page === "profile" && <Profile />}
       </main>
     </div>

@@ -2,6 +2,19 @@ import { getIdToken } from "./auth";
 
 const API_BASE = "/api/v1";
 
+// Thrown by `apiFetch` on any non-2xx response. Exposes the HTTP status
+// so callers can distinguish transient errors (429, 5xx — worth retrying)
+// from terminal ones (400, 401, 404 — not worth retrying) without having
+// to parse the message string.
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 async function authHeaders(): Promise<Record<string, string>> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -22,7 +35,10 @@ export async function apiFetch<T>(
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `API error: ${res.status}`);
+    throw new ApiError(
+      body.error || `API error: ${res.status}`,
+      res.status,
+    );
   }
   return res.json();
 }

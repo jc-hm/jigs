@@ -31,7 +31,21 @@ export function StreamingOutput({
     <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm relative">
       {templateName && (
         <div className="text-sm text-gray-500 mb-3 pb-2 border-b border-gray-100">
-          Template: {templateName}
+          Template:{" "}
+          {/* Clickable link that jumps to the Templates page with the
+              matched file pre-selected, via the `#templates/<path>`
+              hash scheme (see App.tsx#parseHash). Rendered as a button
+              so it's keyboard-reachable and doesn't reload the page. */}
+          <button
+            type="button"
+            onClick={() => {
+              window.location.hash = `#templates/${templateName}`;
+            }}
+            className="font-mono text-blue-600 hover:text-blue-800 hover:underline"
+            title={`Open ${templateName} in Templates`}
+          >
+            {templateName}
+          </button>
         </div>
       )}
       {canCopy && (
