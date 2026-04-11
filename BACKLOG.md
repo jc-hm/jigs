@@ -2,17 +2,6 @@
 
 Ideas and improvements to address later. Not prioritized — just captured so they don't get lost.
 
-## Next Up — Low-Hanging Fruit
-
-A batch of small, independent, low-ambiguity items that can be bundled into a single focused pass. Each one is a few-minutes-to-an-hour change with no architectural decisions involved; together they cover a handful of small UX papercuts without touching any of the flows currently in motion.
-
-- **$10 starter credit on new org signup**: `autoProvisionUser` creates the `ORG` + `USER` records but does not touch `ORG#{id} / BALANCE`. Add a single `addBalance(orgId, 10)` call so new signups immediately have something to spend. Removes the "balance = 0 → 402 on first request" papercut for new users without wiring Stripe first.
-- **Profile page shows remaining balance**: the page currently only shows daily/monthly usage counters. Add a prominent "$X.XX remaining" line read from `ORG#{id} / BALANCE`. The existing `billing/usage` endpoint can return it in one extra field — no new route needed.
-- **Auto-scroll chat to bottom in Templates (and Fill if affected)**: when the assistant posts new tool events, the chat column does not scroll. Standard `useEffect` + `ref.scrollIntoView({behavior: "smooth"})` on message-list length change. Audit Fill page for the same behavior.
-- **Copy buttons on Fill response**: two buttons, matching the Claude Code pattern — one in the top-right of the filled template block (copies the template text alone), one on hover at the top-left of the assistant bubble (copies the full interaction including user prompt + response). Pure frontend, clipboard API.
-- **Steeper retry backoff so users see fewer retry counters**: current `TrackedBedrock` retry sequence shows 4+ "retrying" events before a request lands during throttling. Raise the base delay and multiplier so fewer attempts fit in the same wall-clock window (e.g. `2s → 6s → 18s` instead of `1s → 2s → 4s → 8s → 16s`). Same overall patience, less noisy UI.
-- **Agent should not inject `##` headings when not asked**: when creating templates, Claude has been inserting `##` section headings the user did not request. Add a prompt rule: "Match the user's requested structure exactly — do not add markdown headings, bullet lists, or other structural elements the user did not explicitly ask for." One-line prompt addition.
-
 ## Voice Input UX
 
 - **Silence detection**: Detect when the browser mic returns silence (audio level stuck at 128) and show a warning guiding the user to check their mic settings. Common issue on Chrome/macOS — wrong mic selected, CoreAudio daemon stuck, or OS-level permissions stale.
@@ -35,7 +24,6 @@ The goal: the user should be able to say "something weird happened in the templa
 - **Support-mode log retrieval endpoint**: a small `/api/v1/debug/requests?since=...&orgId=...` endpoint (admin-only) that returns recent request records — request id, route, status, duration, agent round count, error messages, the user message preview, and any retries. Backed by a CloudWatch Logs Insights query or (better) a DynamoDB `REQUEST#{id}` item written by the global request middleware. The frontend already gets a `requestId` per agent run — surface it in the UI so the user can cite it.
 - **Persist full agent conversation + tool calls per request**: today `log.info("agent.round", ...)` captures tool names and stop reasons but not the raw Claude messages. For debugging prompt-leak and context-loss issues, we need the actual `messages[]` array as seen by Bedrock on each round, retrievable by request id. Write to S3 as NDJSON (one object per round) under `s3://jigs-debug-{stage}/{requestId}.ndjson`, auto-expire after 30 days via lifecycle rule. PHI-safe because no report content — only template editing flows touch this path.
 - **Bug: 500 errors in templates agent loop during bulk operations**: seen in practice, not yet diagnosed. Blocked on the retrieval surface above — needs correlated logs before we can hunt.
-- **Bug: tool option descriptions leaking in Spanish interactions**: when chatting in Spanish, Claude has emitted the English tool-parameter descriptions from the system prompt verbatim as filler text. The existing rule "never mention tool names" doesn't cover parameter descriptions. Needs a stronger negative rule plus an explicit example in the prompt.
 - **Bug: conversation context appears to be lost mid-flow**: reported symptom during multi-turn agent sessions. Unclear whether it's history-threading, prompt-budget truncation, or Claude dropping earlier turns on its own. Needs the persistent per-request log above to diagnose.
 
 ## S3 Template Enhancements
@@ -49,11 +37,8 @@ The goal: the user should be able to say "something weird happened in the templa
 
 - **Model `AgentAction` kind explicitly**: The agent currently emits a single flat list of "things touched" (path + tool name). The frontend has to filter by tool name (`tool !== "create_folder"`) to avoid passing folder paths to `selectFile`, which is fragile — any new folder-producing tool silently breaks it. Cleaner: tag each `AgentAction` with `kind: "file" | "folder"` (or split into two arrays at the source) so the frontend can ask for "files only" without enumerating tools. Only worth doing if a second folder-producing tool appears.
 - **Graceful Lambda-timeout warning from the backend**: The agent route relies on the frontend's "stream ended without a terminal event" detection to recover from Lambda being killed at 15 min. That's correct as a floor (it also catches network drops, client sleep, etc.), but the backend *could* do better for the specific Lambda-timeout case: poll `getRemainingTimeInMillis()` and emit a proper `error` SSE event at ~14:30 with a message like "hit maximum execution time, some changes may be partial." Gives the user a clearer explanation than the generic "interrupted" message. Additive to the frontend detection, not a replacement.
-- **Text selection broken in chat column**: cannot currently highlight and copy text from the Templates chat bubbles. Likely a CSS `user-select: none` inherited from a wrapper, or a parent capturing pointer events. Audit and fix.
 - **Stop button during agent runs**: let the user cancel an in-flight agent session (e.g. when Claude is clearly spinning on the wrong path). Wire an `AbortController` through `streamAgent` so the SSE fetch can be cancelled, and ideally notify the server so it bails out of the Bedrock loop. Same pattern needed for the Fill stream.
 - **Refresh file tree on any mutation, not just on stream events**: the tree auto-refreshes after agent runs but manual edits in the editor (save, rename, delete via UI buttons) don't always trigger a refresh. Audit mutation paths and ensure each calls `refreshTree()`.
-- **Spinners for file load and tree load**: clicking a file in the tree has no immediate visual response until the `cat` call returns. Same when the tree itself is loading. Add an inline spinner / skeleton in each to communicate progress.
-- **Template path in URL hash**: `#templates` should become `#templates/path/to/file.md` so reloads land the user on the same file, and the URL updates as the user navigates. Also unlocks the "matched template link" item on the Fill page.
 - **Dedicated "create template from pasted text" flow**: users arriving from other tools want to paste an existing template in free-form text and have the agent generate a well-formed file from it. A small modal with a textarea → calls the agent with a canned system prompt. Probably a better onboarding path than "describe the template you want."
 - **Page reload resilience for long flows**: if the user reloads while an agent or fill stream is running, the stream is lost and they have to restart from scratch. Options: persist in-flight request state to DynamoDB and replay on reconnect, or background the Lambda work and expose a status endpoint to poll. Both are substantial architectural changes — capture the problem now, decide the approach later.
 
@@ -65,9 +50,7 @@ The goal: the user should be able to say "something weird happened in the templa
 
 - **Conversational feel**: The Fill page should display a scrollable conversation — user messages and system responses (including errors like "could not match a template") should all appear as chat messages, not just a blank screen with an error toast. The user should be able to scroll through their history.
 - **Error messages as responses**: API errors (400, 404, 429, 500) should surface as assistant messages in the conversation, not as separate UI elements. "I couldn't match a template for that — try being more specific about the study type."
-- **Collapsed "matched template" line with link**: the Fill response currently prints the matched template path inline as plain text. Replace with a small collapsed row ("Matched: `neuro/brain-mri.md`") that, when clicked, opens the Templates page at that file via the new URL hash scheme. Depends on the Templates URL hash item.
 - **Stop button during fill streams**: same story as the Templates agent stop button — `AbortController` on the fetch, server-side cancel if possible.
-- **Graceful throttling UX on Profile page**: when the `billing/usage` endpoint is throttled or errors, the page currently errors out hard. Add a "loading usage..." fallback and retry logic, so a flaky profile fetch doesn't block the user from seeing their balance.
 
 ## Layout & Navigation
 

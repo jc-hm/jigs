@@ -54,15 +54,35 @@ const MIN_PANEL = 180;
 // Component
 // ---------------------------------------------------------------------------
 
-export function Templates() {
+interface TemplatesProps {
+  // Optional sub-path parsed from `#templates/<path>` by App.tsx. When
+  // present, the page auto-selects that file on mount (and when the hash
+  // changes while Templates is already visible — e.g. from the matched-
+  // template link on the Fill page). When the user picks a different
+  // file manually, we write the selection back into the hash so reload
+  // lands on the same place.
+  initialPath?: string;
+}
+
+export function Templates({ initialPath }: TemplatesProps) {
   // --- File tree ---
   const [tree, setTree] = useState<TreeNode[]>([]);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  // Tracks the initial `loadDir("")` so the tree pane can render a
+  // skeleton instead of "No files yet" while the first list is in flight.
+  // Expand/collapse calls on subdirectories don't flip this — they're
+  // short enough that their own inline indicator isn't worth the weight.
+  const [isLoadingTree, setIsLoadingTree] = useState(true);
 
   // --- Editor ---
   const [editorContent, setEditorContent] = useState("");
   const [savedContent, setSavedContent] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  // True while `selectFile` is awaiting `fileCat`. Without this the
+  // editor shows stale content (or "Select a file to edit" on the very
+  // first click) until the cat call returns, so the user gets no feedback
+  // that their click was registered.
+  const [isLoadingFile, setIsLoadingFile] = useState(false);
 
   // --- Inline input (new file / folder inside a directory) ---
   const [inlineInput, setInlineInput] = useState<{
@@ -124,8 +144,12 @@ export function Templates() {
   );
 
   const refreshTree = useCallback(async () => {
-    const nodes = await loadDir("");
-    setTree(nodes);
+    try {
+      const nodes = await loadDir("");
+      setTree(nodes);
+    } finally {
+      setIsLoadingTree(false);
+    }
   }, [loadDir]);
 
   useEffect(() => {
@@ -169,17 +193,57 @@ export function Templates() {
     async (path: string) => {
       if (path === selectedPath) return;
       if (!guardDirty()) return;
+      // Mark the path as selected immediately so the editor header
+      // switches over and the spinner has something to render against,
+      // even though the content is still loading.
+      setSelectedPath(path);
+      setEditorContent("");
+      setSavedContent("");
+      setIsLoadingFile(true);
       try {
         const { content } = await fileCat(path);
-        setSelectedPath(path);
         setEditorContent(content);
         setSavedContent(content);
       } catch {
         setError(`Could not open ${path}`);
+      } finally {
+        setIsLoadingFile(false);
       }
     },
     [selectedPath, guardDirty]
   );
+
+  // --- Hash ↔ selection sync ---
+  //
+  // Two effects, one in each direction:
+  //   1. Hash → state: when `initialPath` arrives (on mount, or when the
+  //      user hits the matched-template link on Fill and the hash
+  //      changes mid-session), select that file. `selectFile` is already
+  //      a no-op if the path matches the current selection, so this
+  //      doesn't fight with the reverse direction.
+  //   2. State → hash: when the user picks a file in the tree, mirror
+  //      it into `#templates/<path>`. We use `history.replaceState`
+  //      (not an assignment to `location.hash`) so we don't spam the
+  //      back-button history every time the user pokes around.
+  useEffect(() => {
+    if (initialPath) {
+      selectFile(initialPath);
+    }
+    // We deliberately do NOT include `selectFile` in the deps here —
+    // its identity changes with `selectedPath`, which would cause us
+    // to re-fire this effect every time the user picks a new file and
+    // immediately re-select `initialPath`, reverting them back.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialPath]);
+
+  useEffect(() => {
+    const desired = selectedPath
+      ? `#templates/${selectedPath}`
+      : `#templates`;
+    if (window.location.hash !== desired) {
+      window.history.replaceState(null, "", desired);
+    }
+  }, [selectedPath]);
 
   // -------------------------------------------------------------------------
   // Tree expand / collapse
@@ -777,7 +841,14 @@ export function Templates() {
   // -------------------------------------------------------------------------
 
   return (
-    <div ref={containerRef} className="flex h-full select-none">
+    <div ref={containerRef} className="flex h-full">
+      {/* NOTE: `select-none` used to live on this container so dragging the
+          resize handles wouldn't accidentally select text across the whole
+          page. That was too broad — it also killed selection inside the
+          chat bubbles. The resize handlers below already toggle
+          `document.body.style.userSelect = "none"` for the duration of an
+          active drag (see onResizeStart), which solves the original problem
+          without disabling selection everywhere else. */}
       {/* LEFT: AI Chat */}
       <div
         className="border-r border-gray-200 bg-white flex flex-col flex-shrink-0"
@@ -885,6 +956,7 @@ export function Templates() {
                 <span className="text-sm font-mono text-gray-700 truncate">
                   {selectedPath}
                 </span>
+                {isLoadingFile && <InlineSpinner />}
                 {isDirty && (
                   <span className="text-xs text-amber-600 font-medium">
                     (unsaved)
@@ -902,19 +974,26 @@ export function Templates() {
                 )}
                 <button
                   onClick={handleSave}
-                  disabled={!isDirty || isSaving}
+                  disabled={!isDirty || isSaving || isLoadingFile}
                   className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
                 >
                   {isSaving ? "Saving..." : "Save"}
                 </button>
               </div>
             </div>
-            <textarea
-              value={editorContent}
-              onChange={(e) => setEditorContent(e.target.value)}
-              className="flex-1 w-full p-4 text-sm font-mono text-gray-800 bg-white focus:outline-none resize-none"
-              spellCheck={false}
-            />
+            {isLoadingFile ? (
+              <div className="flex-1 flex items-center justify-center text-gray-400 text-sm gap-2">
+                <InlineSpinner />
+                <span>Loading {selectedPath}…</span>
+              </div>
+            ) : (
+              <textarea
+                value={editorContent}
+                onChange={(e) => setEditorContent(e.target.value)}
+                className="flex-1 w-full p-4 text-sm font-mono text-gray-800 bg-white focus:outline-none resize-none"
+                spellCheck={false}
+              />
+            )}
           </>
         ) : (
           <div className="flex items-center justify-center h-full text-gray-400 text-sm">
@@ -1000,12 +1079,21 @@ export function Templates() {
           }}
           onDrop={handleRootDrop}
         >
-          {tree.length === 0 && !showRootInline && (
-            <div className="p-3 text-xs text-gray-400 text-center mt-4">
-              No files yet
+          {isLoadingTree ? (
+            <div className="px-3 py-4 flex items-center justify-center gap-2 text-xs text-gray-400">
+              <InlineSpinner />
+              <span>Loading files…</span>
             </div>
+          ) : (
+            <>
+              {tree.length === 0 && !showRootInline && (
+                <div className="p-3 text-xs text-gray-400 text-center mt-4">
+                  No files yet
+                </div>
+              )}
+              {tree.map((node) => renderNode(node))}
+            </>
           )}
-          {tree.map((node) => renderNode(node))}
         </div>
       </div>
 
@@ -1033,6 +1121,36 @@ export function Templates() {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+// Small spinning SVG used for file-cat and initial-tree-load feedback. Kept
+// self-contained (no external icon dep) and sized small enough to sit next
+// to text without pushing layout around.
+function InlineSpinner() {
+  return (
+    <svg
+      className="animate-spin text-gray-400"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+    >
+      <circle
+        cx="12"
+        cy="12"
+        r="10"
+        stroke="currentColor"
+        strokeWidth="3"
+        strokeOpacity="0.25"
+      />
+      <path
+        d="M12 2a10 10 0 0 1 10 10"
+        stroke="currentColor"
+        strokeWidth="3"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
 
 function CtxItem({
   label,
