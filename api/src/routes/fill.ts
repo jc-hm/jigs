@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { getAIRouter, getAIFiller } from "../services/ai/provider.js";
 import { lsRecursive, cat, findAuthor } from "../services/files/operations.js";
-import { InsufficientBalanceError } from "../services/billing/tracker.js";
+import { InsufficientBalanceError, incrementReportCount } from "../services/billing/tracker.js";
 import { TrackedBedrock } from "../services/billing/tracked-bedrock.js";
 import { writeEvent, writeComment, startHeartbeat } from "../lib/sse.js";
 import type { AppEnv } from "../types.js";
@@ -97,6 +97,14 @@ fill.post("/", async (c) => {
             await writeEvent(s, { type: "text", text: chunk.text });
           } else if (chunk.type === "usage") {
             await writeEvent(s, { type: "done", usage: chunk.data });
+            // Count as a report only when the model actually filled a template
+            // from scratch (NEW_FILL). RE_SELECT and REFINE don't count —
+            // RE_SELECT corrects a routing mistake, REFINE modifies an existing
+            // report. The router's intent classification (Haiku) is the source
+            // of truth here, not a heuristic on the Bedrock call itself.
+            if (route.intent === "NEW_FILL") {
+              await incrementReportCount(user.orgId).catch(() => {});
+            }
           }
         }
       } catch (err) {

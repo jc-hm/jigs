@@ -61,14 +61,24 @@ export interface TrackedCall {
 }
 
 /**
- * Deducts the cost of a Bedrock call from the org balance and, for
- * fill/refine actions, increments the lifetime report counter.
- * Called from TrackedBedrock after each completed call.
+ * Deducts the AI cost of a Bedrock call from the org balance.
+ * Does NOT touch the report counter — that is the caller's responsibility
+ * (see `incrementReportCount`). Called from TrackedBedrock after each call.
  *
  * Failures must not block the API response — the wrapper swallows and logs.
  */
 export async function trackAndDeduct(call: TrackedCall): Promise<void> {
   const chargedCost = calculateCost(call.modelId, call.inputTokens, call.outputTokens) * SPREAD;
-  const reportDelta = call.action === "fill" || call.action === "refine" ? 1 : 0;
-  await deductBalance(call.orgId, chargedCost, reportDelta);
+  await deductBalance(call.orgId, chargedCost, 0);
+}
+
+/**
+ * Increments the org's lifetime report counter by one. Called by the fill
+ * route after a NEW_FILL stream completes successfully — not on REFINE or
+ * RE_SELECT. Kept separate from cost tracking so the decision of what counts
+ * as a "report" lives at the route layer (where intent is known), not inside
+ * the generic Bedrock wrapper.
+ */
+export async function incrementReportCount(orgId: string): Promise<void> {
+  await deductBalance(orgId, 0, 1);
 }

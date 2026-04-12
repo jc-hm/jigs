@@ -397,15 +397,9 @@ export class TrackedBedrock {
       outputPreview: preview(collectedText, 800),
     });
 
-    // Always track fill/refine (to ensure reportsLifetime is bumped) even
-    // when token metadata was not received (e.g. metadata event arrives
-    // after an error). For router/agent_round, only track when we have tokens.
-    const shouldTrack =
-      input.modelId &&
-      (meta.action === "fill" ||
-        meta.action === "refine" ||
-        inputTokens > 0 ||
-        outputTokens > 0);
+    // Track whenever we have token data — cost is what matters here.
+    // Report counting is handled at the route level, not here.
+    const shouldTrack = input.modelId && (inputTokens > 0 || outputTokens > 0);
 
     if (shouldTrack) {
       try {

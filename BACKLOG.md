@@ -2,6 +2,28 @@
 
 Ideas and improvements to address later. Not prioritized — just captured so they don't get lost.
 
+## Unified Agent Paradigm
+
+The current architecture has two distinct AI surfaces: a narrow intent classifier + filler for the Fill page (4 hard-coded intents: NEW_FILL, REFINE, RE_SELECT, UPDATE_TMPL), and an open tool-use agent for the Templates page. These are separate code paths with separate prompts and separate UIs.
+
+**The idea:** replace both with a single agent that can operate in either context, governed by a restricted tool set and a strong system prompt that keeps it on-task. The Fill context would give the agent access only to "fill this template" and "refine this output" tools. The Templates context would give it file management tools. The key challenge is the constraint — an open agent without guardrails will drift into general assistant territory, which is out of scope for Jigs.
+
+**Why it's worth exploring:**
+
+- The current 4-intent router is brittle. UPDATE_TMPL is classified but returns 501 in the fill route — users asking to edit a template from the fill UI get an error. RE_SELECT and REFINE are semantically distinct but handled by the same filler call, making accurate billing and logging hard.
+- Real user utterances don't map cleanly to 4 intents. "Compare with my last report" or "do this in Spanish" fall through the cracks. An agent can reason about intent rather than classify into a fixed enum.
+- A unified interface means one streaming protocol, one session model, one retry/heartbeat mechanism — less duplication.
+
+**The constraint challenge is the core design problem:** how do you give the model enough freedom to be useful (multi-turn, tool selection, clarifying questions) while preventing it from becoming a general assistant that ignores templates entirely? Options include:
+
+- A strong system prompt that frames the agent's identity ("you are a template-filling assistant for radiology reports — you have access to these tools and nothing else")
+- Tool-level restrictions (the fill context literally does not receive file management tools, and vice versa)
+- An output validator that checks whether the final response is a filled template or a file change, and rejects/retries anything else
+
+**Connection to the counting problem:** once intent is determined by the agent itself (rather than a fixed classifier), the agent can emit a structured signal — e.g., a `report_filled` tool call — when it actually produces a report. That signal becomes the definitive counter increment, not a heuristic on action type or route intent.
+
+Worth designing before implementing. The templates agent already exists and proves the tool-use loop works — the question is whether the fill side can be migrated to the same paradigm without sacrificing speed (the 4-intent router is very fast; an agent adds at least one extra round-trip).
+
 ## Voice Input UX
 
 - **Silence detection**: Detect when the browser mic returns silence (audio level stuck at 128) and show a warning guiding the user to check their mic settings. Common issue on Chrome/macOS — wrong mic selected, CoreAudio daemon stuck, or OS-level permissions stale.
