@@ -4,8 +4,8 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/local.ts",
-    "dev:ollama": "AI_PROVIDER=ollama tsx watch src/local.ts",
+    "dev": "STAGE=local tsx watch src/local.ts",
+    "dev:ollama": "STAGE=local AI_PROVIDER=ollama tsx watch src/local.ts",
     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --outdir=dist --format=esm --out-extension:.js=.mjs --external:@aws-sdk/*",
     "typecheck": "tsc --noEmit",
     "seed": "tsx src/db/seed.ts",
