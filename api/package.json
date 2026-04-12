@@ -8,7 +8,7 @@
     "dev:ollama": "STAGE=local AI_PROVIDER=ollama tsx watch src/local.ts",
     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --outdir=dist --format=esm --out-extension:.js=.mjs --external:@aws-sdk/*",
     "typecheck": "tsc --noEmit",
-    "seed": "tsx src/db/seed.ts",
+    "seed": "STAGE=local tsx src/db/seed.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts",
