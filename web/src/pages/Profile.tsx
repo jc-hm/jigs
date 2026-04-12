@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { apiFetch, ApiError } from "../lib/api";
 
 interface Usage {
-  daily: { reportCount: number };
   monthly: { reportCount: number; totalCostUsd: number };
   balance: {
     balanceUsd: number;
@@ -90,7 +89,7 @@ export function Profile() {
       )}
 
       {usage && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="bg-white border border-gray-200 rounded-lg p-4">
             <div className="text-sm text-gray-500">Balance</div>
             <div className="text-2xl font-semibold text-gray-800">
@@ -104,13 +103,6 @@ export function Profile() {
               {usage.balance.reportsLifetime}
             </div>
             <div className="text-xs text-gray-400">lifetime</div>
-          </div>
-          <div className="bg-white border border-gray-200 rounded-lg p-4">
-            <div className="text-sm text-gray-500">Total Cost</div>
-            <div className="text-2xl font-semibold text-gray-800">
-              ${usage.balance.spentUsd.toFixed(2)}
-            </div>
-            <div className="text-xs text-gray-400">lifetime AI inference</div>
           </div>
         </div>
       )}

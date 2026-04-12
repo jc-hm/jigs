@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { getDailyUsage, getMonthlyUsage, getOrgBalance } from "../db/entities.js";
+import { getMonthlyUsage, getOrgBalance } from "../db/entities.js";
 import type { AppEnv } from "../types.js";
 
 const billing = new Hono<AppEnv>();
@@ -8,17 +8,12 @@ const billing = new Hono<AppEnv>();
 billing.get("/usage", async (c) => {
   const user = c.get("user");
 
-  const [daily, monthly, balance] = await Promise.all([
-    getDailyUsage(user.userId),
+  const [monthly, balance] = await Promise.all([
     getMonthlyUsage(`USER#${user.userId}`),
     getOrgBalance(user.orgId),
   ]);
 
-  return c.json({
-    daily: { reportCount: daily },
-    monthly,
-    balance,
-  });
+  return c.json({ monthly, balance });
 });
 
 // Get org-wide usage (admin only)

@@ -2,10 +2,9 @@ import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { getAIRouter, getAIFiller } from "../services/ai/provider.js";
 import { lsRecursive, cat, findAuthor } from "../services/files/operations.js";
-import { checkFreeLimit, InsufficientBalanceError } from "../services/billing/tracker.js";
+import { InsufficientBalanceError } from "../services/billing/tracker.js";
 import { TrackedBedrock } from "../services/billing/tracked-bedrock.js";
 import { writeEvent, writeComment, startHeartbeat } from "../lib/sse.js";
-import { config } from "../env.js";
 import type { AppEnv } from "../types.js";
 
 const fill = new Hono<AppEnv>();
@@ -18,19 +17,6 @@ fill.post("/", async (c) => {
     sessionContext?: string;
     conversationHistory?: Array<{ role: "user" | "assistant"; text: string }>;
   }>();
-
-  // Check free tier (skipped in local dev). This is the legacy daily-report
-  // limit; once topups are wired and new users get a starter credit, this
-  // can be retired in favour of the balance gate inside TrackedBedrock.
-  if (!config.isLocal) {
-    const allowed = await checkFreeLimit(user.userId);
-    if (!allowed) {
-      return c.json(
-        { error: "Daily free limit reached. Upgrade for unlimited reports." },
-        429,
-      );
-    }
-  }
 
   // List all template files (excluding AUTHOR.md and folders)
   const allFiles = await lsRecursive(user.userId);
