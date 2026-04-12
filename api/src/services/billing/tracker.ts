@@ -1,10 +1,6 @@
-import {
-  deductBalance,
-  getDailyUsage,
-  getOrgBalance,
-  incrementUsageCounters,
-  type UsageAction,
-} from "../../db/entities.js";
+import { deductBalance, getOrgBalance } from "../../db/entities.js";
+
+export type UsageAction = "router" | "fill" | "refine" | "agent_round";
 
 // Bedrock list-price per million tokens (USD). These are our underlying costs.
 const MODEL_PRICING: Record<string, { input: number; output: number }> = {
@@ -38,18 +34,6 @@ export function calculateCost(
   );
 }
 
-/**
- * Free-tier daily report cap, used while we transition to a pure
- * balance-based model. Once topups are wired up and new users get a
- * starter credit, this can be retired in favour of `assertBalance` only.
- */
-const FREE_DAILY_LIMIT = 10;
-
-export async function checkFreeLimit(userId: string): Promise<boolean> {
-  const dailyCount = await getDailyUsage(userId);
-  return dailyCount < FREE_DAILY_LIMIT;
-}
-
 export class InsufficientBalanceError extends Error {
   constructor(public orgId: string, public balanceUsd: number) {
     super(`Insufficient balance for org ${orgId}: ${balanceUsd.toFixed(4)} USD`);
@@ -69,46 +53,22 @@ export async function assertBalance(orgId: string): Promise<void> {
 }
 
 export interface TrackedCall {
-  userId: string;
   orgId: string;
-  requestId: string;
   action: UsageAction;
-  templatePath?: string;
-  agentRound?: number;
   modelId: string;
   inputTokens: number;
   outputTokens: number;
-  durationMs: number;
 }
 
 /**
- * Records a successful Bedrock call: deducts the marked-up cost from the
- * org balance and increments per-user/per-org monthly counters. Called from
- * the TrackedBedrock wrapper after each successful call.
+ * Deducts the cost of a Bedrock call from the org balance and, for
+ * fill/refine actions, increments the lifetime report counter.
+ * Called from TrackedBedrock after each completed call.
  *
- * Failures are not retried — usage tracking should never block the API
- * response, so callers may want to swallow errors. The wrapper logs them.
+ * Failures must not block the API response — the wrapper swallows and logs.
  */
 export async function trackAndDeduct(call: TrackedCall): Promise<void> {
-  const bedrockCost = calculateCost(
-    call.modelId,
-    call.inputTokens,
-    call.outputTokens,
-  );
-  const chargedCost = bedrockCost * SPREAD;
-
-  // fill/refine calls produce a user-visible report; router and agent_round
-  // calls do not. Only the former bump the BALANCE row's `reportsLifetime`
-  // counter (surfaced on the Profile page as "Total Reports").
-  const isReport = call.action === "fill" || call.action === "refine";
-
-  await Promise.all([
-    deductBalance(call.orgId, chargedCost, isReport ? 1 : 0),
-    incrementUsageCounters(call.userId, call.orgId, {
-      action: call.action,
-      costUsd: chargedCost,
-      inputTokens: call.inputTokens,
-      outputTokens: call.outputTokens,
-    }),
-  ]);
+  const chargedCost = calculateCost(call.modelId, call.inputTokens, call.outputTokens) * SPREAD;
+  const reportDelta = call.action === "fill" || call.action === "refine" ? 1 : 0;
+  await deductBalance(call.orgId, chargedCost, reportDelta);
 }

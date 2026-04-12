@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { apiFetch, ApiError } from "../lib/api";
 
 interface Usage {
-  monthly: { reportCount: number; totalCostUsd: number };
   balance: {
     balanceUsd: number;
     topUpsUsd: number;

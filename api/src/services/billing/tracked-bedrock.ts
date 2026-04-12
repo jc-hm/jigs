@@ -14,7 +14,7 @@ import {
   trackAndDeduct,
   InsufficientBalanceError,
 } from "./tracker.js";
-import type { UsageAction } from "../../db/entities.js";
+import type { UsageAction } from "./tracker.js";
 import { log, preview } from "../../lib/log.js";
 
 export interface CallContext {
@@ -293,23 +293,16 @@ export class TrackedBedrock {
       outputPreview: responsePreview(response),
     });
 
-    if (
-      usage?.inputTokens != null &&
-      usage?.outputTokens != null &&
-      input.modelId
-    ) {
+    if (input.modelId) {
       try {
         await trackAndDeduct({
-          ...this.ctx,
-          ...meta,
+          orgId: this.ctx.orgId,
+          action: meta.action,
           modelId: input.modelId,
-          inputTokens: usage.inputTokens,
-          outputTokens: usage.outputTokens,
-          durationMs: Date.now() - start,
+          inputTokens: usage?.inputTokens ?? 0,
+          outputTokens: usage?.outputTokens ?? 0,
         });
       } catch (err) {
-        // Tracking failures must not break the API response. Log loudly so
-        // we notice in CloudWatch even though we swallow.
         log.error("bedrock.track.failed", err, {
           requestId: this.ctx.requestId,
           orgId: this.ctx.orgId,
@@ -356,6 +349,13 @@ export class TrackedBedrock {
     let collectedText = "";
     let stopReason: string | undefined;
 
+    // Capture stream errors so we can still track the report count before
+    // rethrowing. Without this, a Bedrock mid-stream error (e.g.
+    // ModelStreamErrorException) would skip trackAndDeduct entirely and the
+    // reportsLifetime counter would never increment even for a fill that
+    // produced output up to the failure point.
+    let streamErr: unknown;
+
     if (response.stream) {
       try {
         for await (const event of response.stream) {
@@ -379,7 +379,7 @@ export class TrackedBedrock {
           modelId: input.modelId,
           durationMs: Date.now() - start,
         });
-        throw err;
+        streamErr = err;
       }
     }
 
@@ -397,15 +397,24 @@ export class TrackedBedrock {
       outputPreview: preview(collectedText, 800),
     });
 
-    if ((inputTokens > 0 || outputTokens > 0) && input.modelId) {
+    // Always track fill/refine (to ensure reportsLifetime is bumped) even
+    // when token metadata was not received (e.g. metadata event arrives
+    // after an error). For router/agent_round, only track when we have tokens.
+    const shouldTrack =
+      input.modelId &&
+      (meta.action === "fill" ||
+        meta.action === "refine" ||
+        inputTokens > 0 ||
+        outputTokens > 0);
+
+    if (shouldTrack) {
       try {
         await trackAndDeduct({
-          ...this.ctx,
-          ...meta,
-          modelId: input.modelId,
+          orgId: this.ctx.orgId,
+          action: meta.action,
+          modelId: input.modelId!,
           inputTokens,
           outputTokens,
-          durationMs: Date.now() - start,
         });
       } catch (err) {
         log.error("bedrock.track.failed", err, {
@@ -415,6 +424,8 @@ export class TrackedBedrock {
         });
       }
     }
+
+    if (streamErr) throw streamErr;
   }
 }
 
