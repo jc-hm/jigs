@@ -277,21 +277,23 @@ export function Fill() {
                   return (
                     <div
                       key={pair.key}
-                      className="relative group space-y-2"
+                      className="group space-y-2"
                     >
-                      {/* Hover-only top-left button: copies the whole pair.
-                          Sits above the user line so it doesn't overlap the
-                          code block's own top-right button. */}
-                      {pair.user && pair.assistant && (
-                        <CopyButton
-                          text={fullInteraction}
-                          label={t("fill.copyInteraction")}
-                          className="absolute -top-1 -left-1 z-10 opacity-0 group-hover:opacity-100"
-                        />
-                      )}
+                      {/* User text row: copy-whole-pair button sits inline to
+                          the left so it never overlaps text. invisible keeps
+                          the layout stable; group-hover reveals it on hover. */}
                       {pair.user && (
-                        <div className="text-sm text-gray-500 italic">
-                          <p>{pair.user.text}</p>
+                        <div className="flex items-start gap-1">
+                          {pair.assistant ? (
+                            <CopyButton
+                              text={fullInteraction}
+                              label={t("fill.copyInteraction")}
+                              className="invisible group-hover:visible shrink-0"
+                            />
+                          ) : (
+                            <div className="w-7 shrink-0" />
+                          )}
+                          <p className="text-sm text-gray-500 italic">{pair.user.text}</p>
                         </div>
                       )}
                       {pair.assistant && (

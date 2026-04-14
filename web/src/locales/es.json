@@ -97,6 +97,7 @@
   "profile.lifetime": "total histórico",
 
   "output.templateLabel": "Plantilla:",
+  "output.matchedTemplate": "plantilla usada",
   "output.copied": "Copiado",
   "output.copyToClipboard": "Copiar al portapapeles",
 

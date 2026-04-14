@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getCurrentUserId } from "../lib/auth";
 
@@ -36,6 +36,8 @@ export function VoiceInput({ onTranscript, disabled, inputRef }: VoiceInputProps
   const [isListening, setIsListening] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
+  const [popupShift, setPopupShift] = useState(0);
+  const popupRef = useRef<HTMLDivElement>(null);
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState(
     () => localStorage.getItem(storageKey("deviceId")) || "",
@@ -196,6 +198,19 @@ export function VoiceInput({ onTranscript, disabled, inputRef }: VoiceInputProps
     }
   }, [selectedDeviceId]);
 
+  // When the popup renders, measure if it would clip past the left edge of the
+  // viewport (common in narrow panels like the template agent chat). If so,
+  // shift it right by the overflow amount so it stays in view.
+  useLayoutEffect(() => {
+    if (!showMenu || !popupRef.current) {
+      setPopupShift(0);
+      return;
+    }
+    const rect = popupRef.current.getBoundingClientRect();
+    const overflow = 8 - rect.left; // 8px safe margin from viewport left
+    setPopupShift(Math.max(0, overflow));
+  }, [showMenu]);
+
   // While the settings menu is open, run audio capture so the level meter
   // shows real-time input — lets the user verify the selected mic works
   // before starting a recording. Also restarts when the selected device
@@ -316,7 +331,11 @@ export function VoiceInput({ onTranscript, disabled, inputRef }: VoiceInputProps
 
         {/* Settings popup */}
         {showMenu && (
-          <div className="absolute bottom-full right-0 mb-2 w-64 bg-white rounded-xl shadow-lg border border-gray-200 p-3 space-y-3 z-50">
+          <div
+            ref={popupRef}
+            className="absolute bottom-full right-0 mb-2 w-56 bg-white rounded-xl shadow-lg border border-gray-200 p-3 space-y-3 z-50"
+            style={popupShift > 0 ? { transform: `translateX(${popupShift}px)` } : undefined}
+          >
             {/* Sound level meter */}
             <div>
               <div className="text-xs font-medium text-gray-500 mb-1.5">

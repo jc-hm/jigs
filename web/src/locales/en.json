@@ -97,6 +97,7 @@
   "profile.lifetime": "lifetime",
 
   "output.templateLabel": "Template:",
+  "output.matchedTemplate": "matched template",
   "output.copied": "Copied",
   "output.copyToClipboard": "Copy to clipboard",
 
