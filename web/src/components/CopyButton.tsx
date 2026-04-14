@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 
 interface CopyButtonProps {
   /** Text to write to the clipboard when clicked. */
@@ -29,9 +30,11 @@ interface CopyButtonProps {
  */
 export function CopyButton({
   text,
-  label = "Copy",
+  label,
   className = "",
 }: CopyButtonProps) {
+  const { t } = useTranslation();
+  const resolvedLabel = label ?? t("copy.label");
   const [copied, setCopied] = useState(false);
 
   const handleClick = async () => {
@@ -48,8 +51,8 @@ export function CopyButton({
     <button
       type="button"
       onClick={handleClick}
-      aria-label={copied ? "Copied" : label}
-      title={copied ? "Copied" : label}
+      aria-label={copied ? t("copy.copied") : resolvedLabel}
+      title={copied ? t("copy.copied") : resolvedLabel}
       className={`p-1.5 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors ${className}`}
     >
       {copied ? (

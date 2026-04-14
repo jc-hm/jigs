@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { getCurrentUserId } from "../lib/auth";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -28,6 +29,7 @@ interface VoiceInputProps {
 }
 
 export function VoiceInput({ onTranscript, disabled }: VoiceInputProps) {
+  const { t, i18n } = useTranslation();
   const [isListening, setIsListening] = useState(false);
   const [soundLevel, setSoundLevel] = useState(0);
   const [showMenu, setShowMenu] = useState(false);
@@ -85,7 +87,7 @@ export function VoiceInput({ onTranscript, disabled }: VoiceInputProps) {
     const recognition = new SR();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = "en-US";
+    recognition.lang = langMap[i18n.language] ?? "en-US";
 
     recognition.onresult = (event: SpeechRecognitionInstance) => {
       let transcript = "";

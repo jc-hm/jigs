@@ -11,5 +11,6 @@ export interface FileContent {
 export interface AgentAction {
   tool: string;
   path?: string;
-  summary: string;
+  /** Source path — only set for move_file so the frontend can render "from → to". */
+  from?: string;
 }

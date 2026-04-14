@@ -70,7 +70,6 @@ export const mockAgent: AIAgent = {
       type: "tool",
       tool: "write_file",
       path: "mock-template",
-      summary: `Created mock-template from: ${message.slice(0, 50)}`,
     };
     yield {
       type: "complete",

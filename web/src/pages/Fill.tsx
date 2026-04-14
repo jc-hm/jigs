@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, type FormEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { streamFill } from "../lib/api";
 import { StreamingOutput } from "../components/StreamingOutput";
 import { VoiceInput } from "../components/VoiceInput";
@@ -16,6 +17,7 @@ import {
 } from "../lib/sessions";
 
 export function Fill() {
+  const { t } = useTranslation();
   const [sessionId, setSessionId] = useState(() => generateSessionId());
   const [messages, setMessages] = useState<SessionMessage[]>([]);
   const [input, setInput] = useState("");
@@ -50,10 +52,17 @@ export function Fill() {
     }
   }, [messages, output]);
 
-  // Save session after messages change (debounced by the streaming flow)
+  // Save session after messages change (debounced by the streaming flow).
+  // skipSaveRef is set by handleLoadSession to prevent a spurious save
+  // (and updatedAt stamp) when restoring a session from history.
   const saveRef = useRef<Session | null>(null);
+  const skipSaveRef = useRef(false);
   useEffect(() => {
     if (messages.length === 0) return;
+    if (skipSaveRef.current) {
+      skipSaveRef.current = false;
+      return;
+    }
     const session: Session = {
       id: sessionId,
       title: "",
@@ -81,6 +90,9 @@ export function Fill() {
   const handleLoadSession = useCallback(async (id: string) => {
     const session = await loadSession(id);
     if (!session) return;
+    // Suppress the save effect — loading a session must not update updatedAt,
+    // reorder the list, or reset the scroll position.
+    skipSaveRef.current = true;
     setSessionId(session.id);
     setMessages(session.messages);
     setTemplatePath(session.templatePath);
@@ -157,7 +169,7 @@ export function Fill() {
           ]);
         } else {
           setError(
-            err instanceof Error ? err.message : "Something went wrong",
+            err instanceof Error ? err.message : t("fill.errorFallback"),
           );
         }
       } finally {
@@ -189,13 +201,13 @@ export function Fill() {
         <div className="w-56 border-r border-gray-200 bg-white flex flex-col">
           <div className="p-3 border-b border-gray-200 flex items-center justify-between">
             <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-              Sessions
+              {t("fill.sessions")}
             </span>
             <button
               onClick={handleNewSession}
               className="text-xs text-blue-600 hover:text-blue-800 font-medium"
             >
-              + New
+              {t("fill.newSession")}
             </button>
           </div>
           <div className="flex-1 overflow-y-auto">
@@ -220,7 +232,7 @@ export function Fill() {
                   <button
                     onClick={(e) => handleDeleteSession(s.id, e)}
                     className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 text-xs shrink-0 mt-0.5"
-                    title="Delete"
+                    title={t("fill.deleteSession")}
                   >
                     &times;
                   </button>
@@ -236,7 +248,7 @@ export function Fill() {
               </div>
             ))}
             {sessions.length === 0 && (
-              <p className="text-xs text-gray-400 p-3">No sessions yet</p>
+              <p className="text-xs text-gray-400 p-3">{t("fill.noSessions")}</p>
             )}
           </div>
         </div>
@@ -252,10 +264,7 @@ export function Fill() {
                 <h2 className="text-2xl font-semibold text-gray-700 mb-2">
                   Jigs
                 </h2>
-                <p>
-                  Describe a study to generate a report. Try: &quot;Left knee MRI,
-                  ACL complete tear, small joint effusion&quot;
-                </p>
+                <p>{t("fill.emptyHint")}</p>
               </div>
             )}
 
@@ -282,7 +291,7 @@ export function Fill() {
                       {pair.user && pair.assistant && (
                         <CopyButton
                           text={fullInteraction}
-                          label="Copy full interaction"
+                          label={t("fill.copyInteraction")}
                           className="absolute -top-1 -left-1 z-10 opacity-0 group-hover:opacity-100"
                         />
                       )}
@@ -297,7 +306,7 @@ export function Fill() {
                               alone (the "code block" copy). */}
                           <CopyButton
                             text={pair.assistant.text}
-                            label="Copy response"
+                            label={t("fill.copyResponse")}
                             className="absolute top-2 right-2 z-10"
                           />
                           <div
@@ -362,7 +371,7 @@ export function Fill() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Describe a study or refine the current report..."
+                placeholder={t("fill.inputPlaceholder")}
                 rows={3}
                 disabled={isStreaming}
                 className="w-full resize-none px-4 pt-3 pb-1 text-sm focus:outline-none bg-transparent disabled:opacity-50"
@@ -390,7 +399,7 @@ export function Fill() {
                     type="submit"
                     disabled={!input.trim()}
                     className="w-8 h-8 flex items-center justify-center rounded-full bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-400 transition-colors shrink-0"
-                    title="Send message"
+                    title={t("fill.send")}
                   >
                     <svg
                       width="16"

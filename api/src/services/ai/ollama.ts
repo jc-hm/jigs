@@ -116,7 +116,6 @@ Respond with JSON: { "actions": [{"tool": "write_file", "path": "...", "content"
           type: "tool",
           tool: a.tool ?? "unknown",
           path: a.path,
-          summary: a.path ? `Wrote ${a.path}` : "Action",
         };
       }
       yield {

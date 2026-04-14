@@ -7,6 +7,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type DragEvent,
 } from "react";
+import { useTranslation } from "react-i18next";
 import {
   fileLs,
   fileCat,
@@ -51,6 +52,25 @@ interface TreeNode {
 const MIN_PANEL = 180;
 
 // ---------------------------------------------------------------------------
+// Tree helpers (module-level, no hooks)
+// ---------------------------------------------------------------------------
+
+// Returns the set of all currently-expanded directory paths so refreshTree
+// can restore the same open/closed state after reloading from the server.
+function getExpandedPaths(nodes: TreeNode[]): Set<string> {
+  const result = new Set<string>();
+  for (const node of nodes) {
+    if (node.isDirectory && node.expanded) {
+      result.add(node.path);
+      if (node.children) {
+        for (const p of getExpandedPaths(node.children)) result.add(p);
+      }
+    }
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -65,6 +85,7 @@ interface TemplatesProps {
 }
 
 export function Templates({ initialPath }: TemplatesProps) {
+  const { t } = useTranslation();
   // --- File tree ---
   const [tree, setTree] = useState<TreeNode[]>([]);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -106,6 +127,19 @@ export function Templates({ initialPath }: TemplatesProps) {
   const [dragSource, setDragSource] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
 
+  // --- Tree refs ---
+  // treeRef always mirrors the latest `tree` state so callbacks that should
+  // NOT have `tree` in their deps (e.g. refreshTree, expandAncestors) can
+  // still read the current tree without causing stale-closure bugs.
+  const treeRef = useRef<TreeNode[]>([]);
+  const treeScrollAreaRef = useRef<HTMLDivElement>(null);
+  // When the tree hasn't finished loading yet but we already know which file
+  // to reveal (e.g. from initialPath on mount), we park the path here and
+  // expand its ancestors once isLoadingTree flips to false.
+  const [pendingExpandPath, setPendingExpandPath] = useState<string | null>(
+    initialPath ?? null
+  );
+
   // --- Agent chat ---
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -125,6 +159,12 @@ export function Templates({ initialPath }: TemplatesProps) {
 
   const isDirty = editorContent !== savedContent;
 
+  // Keep treeRef in sync so callbacks that can't take `tree` as a dep
+  // (refreshTree, expandAncestors) always see the latest value.
+  useEffect(() => {
+    treeRef.current = tree;
+  }, [tree]);
+
   // -------------------------------------------------------------------------
   // Tree loading
   // -------------------------------------------------------------------------
@@ -143,10 +183,39 @@ export function Templates({ initialPath }: TemplatesProps) {
     []
   );
 
+  // Reload the root listing from the server while restoring any folders the
+  // user had open. Uses treeRef (not `tree` state) so this callback stays
+  // stable — adding `tree` to its deps would cause the initial useEffect
+  // below to re-fire on every tree change.
   const refreshTree = useCallback(async () => {
     try {
-      const nodes = await loadDir("");
-      setTree(nodes);
+      const expandedPaths = getExpandedPaths(treeRef.current);
+      const rootNodes = await loadDir("");
+
+      if (expandedPaths.size === 0) {
+        setTree(rootNodes);
+        return;
+      }
+
+      // Re-expand any directory that was open before the refresh.
+      const restoreExpanded = async (nodes: TreeNode[]): Promise<TreeNode[]> => {
+        const result: TreeNode[] = [];
+        for (const node of nodes) {
+          if (node.isDirectory && expandedPaths.has(node.path)) {
+            const children = await loadDir(node.path);
+            result.push({
+              ...node,
+              expanded: true,
+              children: await restoreExpanded(children),
+            });
+          } else {
+            result.push(node);
+          }
+        }
+        return result;
+      };
+
+      setTree(await restoreExpanded(rootNodes));
     } finally {
       setIsLoadingTree(false);
     }
@@ -184,10 +253,8 @@ export function Templates({ initialPath }: TemplatesProps) {
 
   const guardDirty = useCallback((): boolean => {
     if (!isDirty) return true;
-    return window.confirm(
-      "You have unsaved changes. Discard them and open a new file?"
-    );
-  }, [isDirty]);
+    return window.confirm(t("tmpl.discardConfirm"));
+  }, [isDirty, t]);
 
   const selectFile = useCallback(
     async (path: string) => {
@@ -205,7 +272,7 @@ export function Templates({ initialPath }: TemplatesProps) {
         setEditorContent(content);
         setSavedContent(content);
       } catch {
-        setError(`Could not open ${path}`);
+        setError(t("tmpl.errorOpen", { path }));
       } finally {
         setIsLoadingFile(false);
       }
@@ -213,28 +280,101 @@ export function Templates({ initialPath }: TemplatesProps) {
     [selectedPath, guardDirty]
   );
 
+  // -------------------------------------------------------------------------
+  // Ancestor expansion + scroll-to-file
+  // -------------------------------------------------------------------------
+
+  // Expands every ancestor directory of `filePath` that is already in the
+  // tree (fetching children for any that weren't open yet) so the file row
+  // becomes visible. Works off treeRef so it doesn't need `tree` in deps.
+  const expandAncestors = useCallback(
+    async (filePath: string) => {
+      const parts = filePath.split("/");
+      if (parts.length <= 1) return; // root-level file — already visible
+
+      const ancestorSet = new Set<string>();
+      for (let i = 1; i < parts.length; i++) {
+        ancestorSet.add(parts.slice(0, i).join("/"));
+      }
+
+      const expandNodes = async (nodes: TreeNode[]): Promise<TreeNode[]> => {
+        const result: TreeNode[] = [];
+        for (const node of nodes) {
+          if (node.isDirectory && ancestorSet.has(node.path)) {
+            if (!node.expanded || !node.children) {
+              const children = await loadDir(node.path);
+              result.push({
+                ...node,
+                expanded: true,
+                children: await expandNodes(children),
+              });
+            } else {
+              result.push({ ...node, children: await expandNodes(node.children) });
+            }
+          } else if (node.isDirectory && node.expanded && node.children) {
+            result.push({ ...node, children: await expandNodes(node.children) });
+          } else {
+            result.push(node);
+          }
+        }
+        return result;
+      };
+
+      setTree(await expandNodes(treeRef.current));
+    },
+    [loadDir]
+  );
+
+  // Scrolls the file-tree row for `path` into view (called after state
+  // updates settle via a brief timeout so the DOM reflects the new tree).
+  const scrollToTreePath = useCallback((path: string) => {
+    setTimeout(() => {
+      treeScrollAreaRef.current
+        ?.querySelector(`[data-tree-path="${CSS.escape(path)}"]`)
+        ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }, 50);
+  }, []);
+
   // --- Hash ↔ selection sync ---
   //
-  // Two effects, one in each direction:
-  //   1. Hash → state: when `initialPath` arrives (on mount, or when the
-  //      user hits the matched-template link on Fill and the hash
-  //      changes mid-session), select that file. `selectFile` is already
-  //      a no-op if the path matches the current selection, so this
-  //      doesn't fight with the reverse direction.
-  //   2. State → hash: when the user picks a file in the tree, mirror
-  //      it into `#templates/<path>`. We use `history.replaceState`
-  //      (not an assignment to `location.hash`) so we don't spam the
-  //      back-button history every time the user pokes around.
+  // Three effects:
+  //   1. Hash → file content: when `initialPath` arrives (on mount, or when
+  //      the user follows the matched-template link from Fill), load the file
+  //      and update pendingExpandPath so the tree expands once ready.
+  //   2. Tree ready → expand + scroll: once isLoadingTree flips false and
+  //      pendingExpandPath is set, expand ancestors and scroll to the file.
+  //   3. State → hash: mirror the selected file back into the URL hash so
+  //      reloads land on the same file.
   useEffect(() => {
     if (initialPath) {
       selectFile(initialPath);
+      if (isLoadingTree) {
+        // Tree not ready yet — park the path; effect 2 will handle it.
+        setPendingExpandPath(initialPath);
+      } else {
+        expandAncestors(initialPath).then(() => scrollToTreePath(initialPath));
+      }
     }
-    // We deliberately do NOT include `selectFile` in the deps here —
-    // its identity changes with `selectedPath`, which would cause us
-    // to re-fire this effect every time the user picks a new file and
-    // immediately re-select `initialPath`, reverting them back.
+    // We deliberately do NOT include `selectFile` / `expandAncestors` /
+    // `isLoadingTree` in the deps here — their identities change with state
+    // in ways that would cause repeated re-fires and fight with user
+    // interaction. `initialPath` is the only meaningful trigger here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialPath]);
+
+  // Once the tree finishes loading, apply any pending ancestor expansion.
+  // This covers the initial-mount case where `initialPath` arrived before
+  // the first `loadDir("")` completed.
+  useEffect(() => {
+    if (!isLoadingTree && pendingExpandPath) {
+      const path = pendingExpandPath;
+      setPendingExpandPath(null);
+      expandAncestors(path).then(() => scrollToTreePath(path));
+    }
+    // expandAncestors / scrollToTreePath are stable; omitting them from deps
+    // intentionally to avoid re-firing when they re-create.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoadingTree]);
 
   useEffect(() => {
     const desired = selectedPath
@@ -290,7 +430,7 @@ export function Templates({ initialPath }: TemplatesProps) {
       await fileWrite(selectedPath, editorContent);
       setSavedContent(editorContent);
     } catch {
-      setError("Failed to save");
+      setError(t("tmpl.errorSave"));
     } finally {
       setIsSaving(false);
     }
@@ -302,8 +442,10 @@ export function Templates({ initialPath }: TemplatesProps) {
 
   const handleDelete = useCallback(
     async (path: string, isDirectory: boolean) => {
-      const label = isDirectory ? "folder and all its contents" : "file";
-      if (!window.confirm(`Delete this ${label}?\n${path}`)) return;
+      const confirmMsg = isDirectory
+        ? t("tmpl.deleteFolderConfirm", { path })
+        : t("tmpl.deleteFileConfirm", { path });
+      if (!window.confirm(confirmMsg)) return;
       try {
         if (isDirectory) {
           await fileRmDir(path);
@@ -317,10 +459,10 @@ export function Templates({ initialPath }: TemplatesProps) {
         }
         await refreshTree();
       } catch {
-        setError(`Failed to delete ${path}`);
+        setError(t("tmpl.errorDelete", { path }));
       }
     },
-    [selectedPath, refreshTree]
+    [selectedPath, refreshTree, t]
   );
 
   const handleRename = useCallback(
@@ -337,11 +479,11 @@ export function Templates({ initialPath }: TemplatesProps) {
         if (selectedPath === oldPath) setSelectedPath(newPath);
         await refreshTree();
       } catch {
-        setError(`Failed to rename ${oldPath}`);
+        setError(t("tmpl.errorRename", { path: oldPath }));
       }
       setRenamingPath(null);
     },
-    [selectedPath, refreshTree]
+    [selectedPath, refreshTree, t]
   );
 
   const handleInlineCreate = useCallback(
@@ -364,12 +506,12 @@ export function Templates({ initialPath }: TemplatesProps) {
         await refreshTree();
         if (type === "file") await selectFile(fullPath);
       } catch {
-        setError(`Failed to create ${fullPath}`);
+        setError(t("tmpl.errorCreate", { path: fullPath }));
       }
       setInlineInput(null);
       setInlineValue("");
     },
-    [inlineInput, inlineValue, refreshTree, selectFile]
+    [inlineInput, inlineValue, refreshTree, selectFile, t]
   );
 
   // -------------------------------------------------------------------------
@@ -413,11 +555,11 @@ export function Templates({ initialPath }: TemplatesProps) {
         if (selectedPath === dragSource) setSelectedPath(newPath);
         await refreshTree();
       } catch {
-        setError(`Failed to move ${dragSource} to ${targetDir.path}`);
+        setError(t("tmpl.errorMove", { path: dragSource, dest: targetDir.path }));
       }
       setDragSource(null);
     },
-    [dragSource, selectedPath, refreshTree]
+    [dragSource, selectedPath, refreshTree, t]
   );
 
   const handleDragEnd = useCallback(() => {
@@ -438,11 +580,11 @@ export function Templates({ initialPath }: TemplatesProps) {
         if (selectedPath === dragSource) setSelectedPath(sourceName);
         await refreshTree();
       } catch {
-        setError(`Failed to move ${dragSource} to root`);
+        setError(t("tmpl.errorMoveRoot", { path: dragSource }));
       }
       setDragSource(null);
     },
-    [dragSource, selectedPath, refreshTree]
+    [dragSource, selectedPath, refreshTree, t]
   );
 
   // -------------------------------------------------------------------------
@@ -542,10 +684,24 @@ export function Templates({ initialPath }: TemplatesProps) {
           conversationHistory: historyForAgent,
         })) {
           if (event.type === "tool") {
-            toolLines.push(`- ${event.summary}`);
+            const toolLabel = (() => {
+              switch (event.tool) {
+                case "write_file":     return t("tmpl.toolWrote", { path: event.path });
+                case "delete_file":    return t("tmpl.toolDeleted", { path: event.path });
+                case "move_file":      return t("tmpl.toolMoved", { from: event.from, to: event.path });
+                case "create_folder":  return t("tmpl.toolCreatedFolder", { path: event.path });
+                default:               return `${event.tool} ${event.path ?? ""}`.trim();
+              }
+            })();
+            toolLines.push(`- ${toolLabel}`);
             if (event.path && event.tool !== "create_folder") {
               changedFilePaths.push(event.path);
             }
+            // Refresh the tree immediately after each file operation so the
+            // user sees changes as they happen (not only when the agent finishes).
+            // Fire-and-forget: the final refresh in `finally` is the source of
+            // truth; these incremental updates just improve perceived liveness.
+            refreshTree().catch(() => {});
             // A tool event means a round just completed, so any retry
             // counter from a prior round's backoffs should be cleared.
             updateLast((m) => ({
@@ -598,7 +754,7 @@ export function Templates({ initialPath }: TemplatesProps) {
       } catch (err) {
         sawTerminalEvent = true;
         const msg =
-          err instanceof Error ? err.message : "Something went wrong";
+          err instanceof Error ? err.message : t("tmpl.errorFallback");
         const errorText = toolLines.length
           ? `${toolLines.join("\n")}\n\nError: ${msg}`
           : `Error: ${msg}`;
@@ -616,8 +772,7 @@ export function Templates({ initialPath }: TemplatesProps) {
         // etc.). Without this, the assistant message would stay stuck
         // with inProgress=true forever, making the UI look hung.
         if (!sawTerminalEvent) {
-          const interruptedMessage =
-            "Request interrupted before completion. Some changes may be partial — the file tree reflects what actually landed.";
+          const interruptedMessage = t("tmpl.interrupted");
           const interruptedText = toolLines.length
             ? `${toolLines.join("\n")}\n\n${interruptedMessage}`
             : interruptedMessage;
@@ -653,7 +808,7 @@ export function Templates({ initialPath }: TemplatesProps) {
         );
       }
     },
-    [input, isProcessing, messages, refreshTree, selectFile]
+    [input, isProcessing, messages, refreshTree, selectFile, t]
   );
 
   const handleChatKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -725,6 +880,7 @@ export function Templates({ initialPath }: TemplatesProps) {
     return (
       <div key={node.path}>
         <div
+          data-tree-path={node.path}
           draggable={!isRenaming}
           onDragStart={(e) => handleDragStart(e, node.path)}
           onDragOver={(e) => handleDragOver(e, node)}
@@ -774,7 +930,7 @@ export function Templates({ initialPath }: TemplatesProps) {
             <button
               onClick={(e) => openContextMenu(e, node)}
               className="opacity-0 group-hover:opacity-100 p-0.5 text-gray-400 hover:text-gray-700 flex-shrink-0"
-              title="Actions"
+              title={t("tmpl.actionsTitle")}
             >
               <svg
                 width="14"
@@ -815,7 +971,7 @@ export function Templates({ initialPath }: TemplatesProps) {
                 }
               }}
               placeholder={
-                inlineInput.type === "folder" ? "folder-name" : "filename"
+                inlineInput.type === "folder" ? t("tmpl.folderPlaceholder") : t("tmpl.filePlaceholder")
               }
               className="flex-1 min-w-0 text-xs border border-blue-400 rounded px-1 py-0.5 outline-none font-mono"
             />
@@ -855,7 +1011,7 @@ export function Templates({ initialPath }: TemplatesProps) {
         style={{ width: leftWidth }}
       >
         <div className="p-3 border-b border-gray-200">
-          <h2 className="text-sm font-semibold text-gray-700">AI Agent</h2>
+          <h2 className="text-sm font-semibold text-gray-700">{t("tmpl.agentTitle")}</h2>
         </div>
 
         <div
@@ -865,11 +1021,10 @@ export function Templates({ initialPath }: TemplatesProps) {
           {messages.length === 0 && (
             <div className="text-center text-gray-400 text-sm mt-8 px-2">
               <p className="mb-2 font-medium text-gray-500">
-                Ask the AI to manage your templates
+                {t("tmpl.agentEmptyHeading")}
               </p>
               <p className="text-xs">
-                "Create a brain MRI template", "Move all neuro templates to a
-                neuro/ folder", "Add an impressions section to ct-chest"
+                {t("tmpl.agentEmptyExamples")}
               </p>
             </div>
           )}
@@ -885,7 +1040,7 @@ export function Templates({ initialPath }: TemplatesProps) {
                   msg.role === "user" ? "text-blue-600" : "text-gray-400"
                 }`}
               >
-                {msg.role === "user" ? "You" : "Agent"}
+                {msg.role === "user" ? t("tmpl.youLabel") : t("tmpl.agentLabel")}
               </span>
               {msg.text && (
                 <p className="whitespace-pre-wrap break-words">{msg.text}</p>
@@ -896,7 +1051,7 @@ export function Templates({ initialPath }: TemplatesProps) {
                   share the same chat bubble. */}
               {msg.inProgress && !msg.retryCount && (
                 <p className="text-gray-400 animate-pulse mt-0.5">
-                  {msg.text ? "Working..." : "Thinking..."}
+                  {msg.text ? t("tmpl.working") : t("tmpl.thinking")}
                 </p>
               )}
               {/* Retry counter: shown only when the wrapper is currently
@@ -904,7 +1059,7 @@ export function Templates({ initialPath }: TemplatesProps) {
                   from a hard error and from the normal spinner. */}
               {msg.inProgress && msg.retryCount && msg.retryMax && (
                 <p className="text-amber-600 mt-0.5">
-                  AI is busy — retry {msg.retryCount}/{msg.retryMax}…
+                  {t("tmpl.aiBusy", { count: msg.retryCount, max: msg.retryMax })}
                 </p>
               )}
             </div>
@@ -925,7 +1080,7 @@ export function Templates({ initialPath }: TemplatesProps) {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleChatKeyDown}
-              placeholder="Ask the agent..."
+              placeholder={t("tmpl.agentPlaceholder")}
               rows={2}
               disabled={isProcessing}
               className="flex-1 resize-none rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50"
@@ -935,7 +1090,7 @@ export function Templates({ initialPath }: TemplatesProps) {
               disabled={!input.trim() || isProcessing}
               className="self-end px-3 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
             >
-              Send
+              {t("tmpl.send")}
             </button>
           </form>
         </div>
@@ -959,7 +1114,7 @@ export function Templates({ initialPath }: TemplatesProps) {
                 {isLoadingFile && <InlineSpinner />}
                 {isDirty && (
                   <span className="text-xs text-amber-600 font-medium">
-                    (unsaved)
+                    {t("tmpl.unsaved")}
                   </span>
                 )}
               </div>
@@ -969,7 +1124,7 @@ export function Templates({ initialPath }: TemplatesProps) {
                     onClick={handleDiscard}
                     className="px-3 py-1.5 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors"
                   >
-                    Discard
+                    {t("tmpl.discard")}
                   </button>
                 )}
                 <button
@@ -977,14 +1132,14 @@ export function Templates({ initialPath }: TemplatesProps) {
                   disabled={!isDirty || isSaving || isLoadingFile}
                   className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
                 >
-                  {isSaving ? "Saving..." : "Save"}
+                  {isSaving ? t("tmpl.saving") : t("tmpl.save")}
                 </button>
               </div>
             </div>
             {isLoadingFile ? (
               <div className="flex-1 flex items-center justify-center text-gray-400 text-sm gap-2">
                 <InlineSpinner />
-                <span>Loading {selectedPath}…</span>
+                <span>{t("tmpl.loadingFile", { path: selectedPath })}</span>
               </div>
             ) : (
               <textarea
@@ -997,7 +1152,7 @@ export function Templates({ initialPath }: TemplatesProps) {
           </>
         ) : (
           <div className="flex items-center justify-center h-full text-gray-400 text-sm">
-            Select a file to edit
+            {t("tmpl.selectFile")}
           </div>
         )}
       </div>
@@ -1015,7 +1170,7 @@ export function Templates({ initialPath }: TemplatesProps) {
       >
         <div className="p-3 border-b border-gray-200 flex items-center justify-between">
           <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-            Files
+            {t("tmpl.filesTitle")}
           </h2>
           <div className="flex gap-1">
             <button
@@ -1024,9 +1179,9 @@ export function Templates({ initialPath }: TemplatesProps) {
                 setInlineValue("");
               }}
               className="px-1.5 py-0.5 text-xs text-gray-500 hover:text-blue-600 border border-gray-300 rounded transition-colors"
-              title="New file at root"
+              title={t("tmpl.newFileTitle")}
             >
-              +File
+              {t("tmpl.newFile")}
             </button>
             <button
               onClick={() => {
@@ -1034,9 +1189,9 @@ export function Templates({ initialPath }: TemplatesProps) {
                 setInlineValue("");
               }}
               className="px-1.5 py-0.5 text-xs text-gray-500 hover:text-blue-600 border border-gray-300 rounded transition-colors"
-              title="New folder at root"
+              title={t("tmpl.newFolderTitle")}
             >
-              +Dir
+              {t("tmpl.newDir")}
             </button>
           </div>
         </div>
@@ -1061,7 +1216,7 @@ export function Templates({ initialPath }: TemplatesProps) {
                 setInlineValue("");
               }}
               placeholder={
-                inlineInput!.type === "folder" ? "folder-name" : "filename"
+                inlineInput!.type === "folder" ? t("tmpl.folderPlaceholder") : t("tmpl.filePlaceholder")
               }
               className="w-full text-xs border border-blue-400 rounded px-2 py-1 outline-none font-mono"
             />
@@ -1070,6 +1225,7 @@ export function Templates({ initialPath }: TemplatesProps) {
 
         {/* Tree */}
         <div
+          ref={treeScrollAreaRef}
           className="flex-1 overflow-y-auto py-1"
           onDragOver={(e) => {
             if (dragSource) {
@@ -1082,13 +1238,13 @@ export function Templates({ initialPath }: TemplatesProps) {
           {isLoadingTree ? (
             <div className="px-3 py-4 flex items-center justify-center gap-2 text-xs text-gray-400">
               <InlineSpinner />
-              <span>Loading files…</span>
+              <span>{t("tmpl.loadingFiles")}</span>
             </div>
           ) : (
             <>
               {tree.length === 0 && !showRootInline && (
                 <div className="p-3 text-xs text-gray-400 text-center mt-4">
-                  No files yet
+                  {t("tmpl.noFiles")}
                 </div>
               )}
               {tree.map((node) => renderNode(node))}
@@ -1107,11 +1263,11 @@ export function Templates({ initialPath }: TemplatesProps) {
           }}
           onClick={(e) => e.stopPropagation()}
         >
-          <CtxItem label="New File" onClick={ctxNewFile} />
-          <CtxItem label="New Folder" onClick={ctxNewFolder} />
+          <CtxItem label={t("tmpl.ctxNewFile")} onClick={ctxNewFile} />
+          <CtxItem label={t("tmpl.ctxNewFolder")} onClick={ctxNewFolder} />
           <div className="border-t border-gray-100 my-1" />
-          <CtxItem label="Rename" onClick={ctxRename} />
-          <CtxItem label="Delete" onClick={ctxDelete} danger />
+          <CtxItem label={t("tmpl.ctxRename")} onClick={ctxRename} />
+          <CtxItem label={t("tmpl.ctxDelete")} onClick={ctxDelete} danger />
         </div>
       )}
     </div>

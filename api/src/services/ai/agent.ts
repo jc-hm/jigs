@@ -132,21 +132,21 @@ async function executeTool(
       await ops.write(userId, input.path, input.content);
       return {
         result: `Written to ${input.path}`,
-        action: { tool: "write_file", path: input.path, summary: `Wrote ${input.path}` },
+        action: { tool: "write_file", path: input.path },
       };
     }
     case "delete_file": {
       await ops.rm(userId, input.path);
       return {
         result: `Deleted ${input.path}`,
-        action: { tool: "delete_file", path: input.path, summary: `Deleted ${input.path}` },
+        action: { tool: "delete_file", path: input.path },
       };
     }
     case "move_file": {
       await ops.mv(userId, input.from, input.to);
       return {
         result: `Moved ${input.from} → ${input.to}`,
-        action: { tool: "move_file", path: input.to, summary: `Moved ${input.from} → ${input.to}` },
+        action: { tool: "move_file", path: input.to, from: input.from },
       };
     }
     case "list_files": {
@@ -169,11 +169,7 @@ async function executeTool(
       await ops.mkdir(userId, input.path);
       return {
         result: `Created folder ${input.path}`,
-        action: {
-          tool: "create_folder",
-          path: input.path,
-          summary: `Created folder ${input.path}`,
-        },
+        action: { tool: "create_folder", path: input.path },
       };
     }
     default:
@@ -295,7 +291,7 @@ Rules for your responses:
                 type: "tool",
                 tool: action.tool,
                 path: action.path,
-                summary: action.summary,
+                from: action.from,
               };
             }
 

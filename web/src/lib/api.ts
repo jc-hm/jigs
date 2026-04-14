@@ -175,7 +175,7 @@ export interface FileEntry {
 // (and retry attempts when Bedrock throttles), instead of waiting on a
 // single 60-120s JSON response that CloudFront kills mid-flight.
 export type AgentEvent =
-  | { type: "tool"; tool: string; path?: string; summary: string }
+  | { type: "tool"; tool: string; path?: string; from?: string }
   | {
       type: "retry";
       attempt: number;

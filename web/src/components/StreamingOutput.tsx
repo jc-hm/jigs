@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 
 interface StreamingOutputProps {
   text: string;
@@ -11,6 +12,7 @@ export function StreamingOutput({
   isStreaming,
   templateName,
 }: StreamingOutputProps) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
 
   if (!text && !isStreaming) return null;
@@ -31,7 +33,7 @@ export function StreamingOutput({
     <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm relative">
       {templateName && (
         <div className="text-sm text-gray-500 mb-3 pb-2 border-b border-gray-100">
-          Template:{" "}
+          {t("output.templateLabel")}{" "}
           {/* Clickable link that jumps to the Templates page with the
               matched file pre-selected, via the `#templates/<path>`
               hash scheme (see App.tsx#parseHash). Rendered as a button
@@ -52,8 +54,8 @@ export function StreamingOutput({
         <button
           type="button"
           onClick={handleCopy}
-          aria-label={copied ? "Copied" : "Copy to clipboard"}
-          title={copied ? "Copied" : "Copy to clipboard"}
+          aria-label={copied ? t("output.copied") : t("output.copyToClipboard")}
+          title={copied ? t("output.copied") : t("output.copyToClipboard")}
           className="absolute top-3 right-3 p-1.5 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
         >
           {copied ? (

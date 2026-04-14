@@ -55,7 +55,7 @@ export interface AIFiller {
  *   failures to HTTP errors before any event is sent.
  */
 export type AgentEvent =
-  | { type: "tool"; tool: string; path?: string; summary: string }
+  | { type: "tool"; tool: string; path?: string; from?: string }
   | {
       type: "retry";
       attempt: number;

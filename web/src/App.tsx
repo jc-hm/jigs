@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import type { FormEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { Fill } from "./pages/Fill";
 import { Templates } from "./pages/Templates";
 import { Profile } from "./pages/Profile";
@@ -36,6 +37,7 @@ function parseHash(): { page: Page; subpath: string } {
 }
 
 function App() {
+  const { t } = useTranslation();
   const [authState, setAuthState] = useState<AuthState>("loading");
   const [authError, setAuthError] = useState("");
   const [route, setRoute] = useState(parseHash);
@@ -97,7 +99,7 @@ function App() {
   if (authState === "loading") {
     return (
       <div className="flex items-center justify-center h-screen bg-gray-50">
-        <p className="text-gray-400 text-sm">Loading...</p>
+        <p className="text-gray-400 text-sm">{t("app.loading")}</p>
       </div>
     );
   }
@@ -106,16 +108,16 @@ function App() {
     return (
       <div className="flex items-center justify-center h-screen bg-gray-50">
         <div className="text-center max-w-sm">
-          <h1 className="text-lg font-bold text-gray-800 mb-2">Unable to load</h1>
+          <h1 className="text-lg font-bold text-gray-800 mb-2">{t("app.errorTitle")}</h1>
           <p className="text-gray-500 text-sm mb-4">
-            Could not connect to the server. Please try again later.
+            {t("app.errorBody")}
           </p>
           <p className="text-gray-400 text-xs mb-4">{authError}</p>
           <button
             onClick={() => window.location.reload()}
             className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition-colors"
           >
-            Retry
+            {t("app.retry")}
           </button>
         </div>
       </div>
@@ -132,17 +134,17 @@ function App() {
       <header className="h-11 shrink-0 bg-white border-b border-gray-200 flex items-center px-4 gap-1">
         <span className="text-base font-bold text-gray-800 mr-4">Jigs</span>
         <NavItem
-          label="Fill Report"
+          label={t("nav.fillReport")}
           active={page === "fill"}
           onClick={() => navigate("fill")}
         />
         <NavItem
-          label="Templates"
+          label={t("nav.templates")}
           active={page === "templates"}
           onClick={() => navigate("templates")}
         />
         <NavItem
-          label="Profile"
+          label={t("nav.profile")}
           active={page === "profile"}
           onClick={() => navigate("profile")}
         />
@@ -151,7 +153,7 @@ function App() {
           onClick={handleSignOut}
           className="px-3 py-1.5 rounded-md text-sm text-gray-500 hover:bg-gray-100 transition-colors"
         >
-          Sign out
+          {t("nav.signOut")}
         </button>
       </header>
 
@@ -174,6 +176,7 @@ function App() {
 type AuthMode = "signin" | "signup" | "verify";
 
 function AuthScreen({ onSignedIn }: { onSignedIn: () => void }) {
+  const { t } = useTranslation();
   const [mode, setMode] = useState<AuthMode>("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -190,7 +193,7 @@ function AuthScreen({ onSignedIn }: { onSignedIn: () => void }) {
       onSignedIn();
     } catch (err: unknown) {
       const msg =
-        err instanceof Error ? err.message : "Sign in failed";
+        err instanceof Error ? err.message : t("auth.signInFailed");
       if (msg.includes("User is not confirmed")) {
         setMode("verify");
         try { await resendCode(email); } catch { /* ignore */ }
@@ -210,7 +213,7 @@ function AuthScreen({ onSignedIn }: { onSignedIn: () => void }) {
       await signUp(email, password);
       setMode("verify");
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Sign up failed");
+      setError(err instanceof Error ? err.message : t("auth.signUpFailed"));
     } finally {
       setLoading(false);
     }
@@ -227,7 +230,7 @@ function AuthScreen({ onSignedIn }: { onSignedIn: () => void }) {
       onSignedIn();
     } catch (err: unknown) {
       setError(
-        err instanceof Error ? err.message : "Verification failed"
+        err instanceof Error ? err.message : t("auth.verifyFailed")
       );
     } finally {
       setLoading(false);
@@ -238,9 +241,9 @@ function AuthScreen({ onSignedIn }: { onSignedIn: () => void }) {
     setError("");
     try {
       await resendCode(email);
-      setError("Code resent — check your email.");
+      setError(t("auth.codeResent"));
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Resend failed");
+      setError(err instanceof Error ? err.message : t("auth.resendFailed"));
     }
   };
 
@@ -251,14 +254,14 @@ function AuthScreen({ onSignedIn }: { onSignedIn: () => void }) {
           Jigs
         </h1>
         <p className="text-gray-500 mb-8 text-center text-sm">
-          AI-powered template filling
+          {t("auth.tagline")}
         </p>
 
         {mode === "signin" && (
           <form onSubmit={handleSignIn} className="space-y-4">
             <input
               type="email"
-              placeholder="Email"
+              placeholder={t("auth.emailPlaceholder")}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
@@ -266,7 +269,7 @@ function AuthScreen({ onSignedIn }: { onSignedIn: () => void }) {
             />
             <input
               type="password"
-              placeholder="Password"
+              placeholder={t("auth.passwordPlaceholder")}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
@@ -280,10 +283,10 @@ function AuthScreen({ onSignedIn }: { onSignedIn: () => void }) {
               disabled={loading}
               className="w-full py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50"
             >
-              {loading ? "Signing in..." : "Sign in"}
+              {loading ? t("auth.signingIn") : t("auth.signIn")}
             </button>
             <p className="text-center text-xs text-gray-500">
-              Don&apos;t have an account?{" "}
+              {t("auth.noAccount")}{" "}
               <button
                 type="button"
                 onClick={() => {
@@ -292,7 +295,7 @@ function AuthScreen({ onSignedIn }: { onSignedIn: () => void }) {
                 }}
                 className="text-blue-600 hover:underline"
               >
-                Sign up
+                {t("auth.signUp")}
               </button>
             </p>
           </form>
@@ -302,7 +305,7 @@ function AuthScreen({ onSignedIn }: { onSignedIn: () => void }) {
           <form onSubmit={handleSignUp} className="space-y-4">
             <input
               type="email"
-              placeholder="Email"
+              placeholder={t("auth.emailPlaceholder")}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
@@ -310,7 +313,7 @@ function AuthScreen({ onSignedIn }: { onSignedIn: () => void }) {
             />
             <input
               type="password"
-              placeholder="Password (min 8 chars, 1 digit)"
+              placeholder={t("auth.passwordHint")}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
@@ -325,10 +328,10 @@ function AuthScreen({ onSignedIn }: { onSignedIn: () => void }) {
               disabled={loading}
               className="w-full py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50"
             >
-              {loading ? "Creating account..." : "Sign up"}
+              {loading ? t("auth.creatingAccount") : t("auth.signUp")}
             </button>
             <p className="text-center text-xs text-gray-500">
-              Already have an account?{" "}
+              {t("auth.hasAccount")}{" "}
               <button
                 type="button"
                 onClick={() => {
@@ -337,7 +340,7 @@ function AuthScreen({ onSignedIn }: { onSignedIn: () => void }) {
                 }}
                 className="text-blue-600 hover:underline"
               >
-                Sign in
+                {t("auth.signIn")}
               </button>
             </p>
           </form>
@@ -346,12 +349,12 @@ function AuthScreen({ onSignedIn }: { onSignedIn: () => void }) {
         {mode === "verify" && (
           <form onSubmit={handleVerify} className="space-y-4">
             <p className="text-sm text-gray-600 text-center">
-              Enter the verification code sent to{" "}
+              {t("auth.verifyPrompt")}{" "}
               <span className="font-medium">{email}</span>
             </p>
             <input
               type="text"
-              placeholder="Verification code"
+              placeholder={t("auth.codePlaceholder")}
               value={code}
               onChange={(e) => setCode(e.target.value)}
               required
@@ -359,7 +362,7 @@ function AuthScreen({ onSignedIn }: { onSignedIn: () => void }) {
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-center tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
             {error && (
-              <p className={`text-xs ${error.includes("resent") ? "text-green-600" : "text-red-600"}`}>
+              <p className={`text-xs ${error === t("auth.codeResent") ? "text-green-600" : "text-red-600"}`}>
                 {error}
               </p>
             )}
@@ -368,7 +371,7 @@ function AuthScreen({ onSignedIn }: { onSignedIn: () => void }) {
               disabled={loading}
               className="w-full py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50"
             >
-              {loading ? "Verifying..." : "Verify"}
+              {loading ? t("auth.verifying") : t("auth.verify")}
             </button>
             <p className="text-center text-xs text-gray-500">
               <button
@@ -376,7 +379,7 @@ function AuthScreen({ onSignedIn }: { onSignedIn: () => void }) {
                 onClick={handleResend}
                 className="text-blue-600 hover:underline"
               >
-                Resend code
+                {t("auth.resendCode")}
               </button>
               {" · "}
               <button
@@ -387,7 +390,7 @@ function AuthScreen({ onSignedIn }: { onSignedIn: () => void }) {
                 }}
                 className="text-blue-600 hover:underline"
               >
-                Back to sign in
+                {t("auth.backToSignIn")}
               </button>
             </p>
           </form>

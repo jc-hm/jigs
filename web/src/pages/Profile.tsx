@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { apiFetch, ApiError } from "../lib/api";
 
 interface Usage {
@@ -30,6 +31,7 @@ function isTransient(err: unknown): boolean {
 }
 
 export function Profile() {
+  const { t } = useTranslation();
   const [usage, setUsage] = useState<Usage>();
   const [error, setError] = useState<string>();
   const [isLoading, setIsLoading] = useState(true);
@@ -73,11 +75,11 @@ export function Profile() {
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
-      <h1 className="text-2xl font-semibold text-gray-800 mb-6">Profile</h1>
+      <h1 className="text-2xl font-semibold text-gray-800 mb-6">{t("profile.title")}</h1>
 
       {isLoading && (
         <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg text-gray-500 text-sm mb-4">
-          Loading usage…
+          {t("profile.loadingUsage")}
         </div>
       )}
 
@@ -90,18 +92,18 @@ export function Profile() {
       {usage && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="bg-white border border-gray-200 rounded-lg p-4">
-            <div className="text-sm text-gray-500">Balance</div>
+            <div className="text-sm text-gray-500">{t("profile.balance")}</div>
             <div className="text-2xl font-semibold text-gray-800">
               ${usage.balance.balanceUsd.toFixed(2)}
             </div>
-            <div className="text-xs text-gray-400">remaining credit</div>
+            <div className="text-xs text-gray-400">{t("profile.remainingCredit")}</div>
           </div>
           <div className="bg-white border border-gray-200 rounded-lg p-4">
-            <div className="text-sm text-gray-500">Total Reports</div>
+            <div className="text-sm text-gray-500">{t("profile.totalReports")}</div>
             <div className="text-2xl font-semibold text-gray-800">
               {usage.balance.reportsLifetime}
             </div>
-            <div className="text-xs text-gray-400">lifetime</div>
+            <div className="text-xs text-gray-400">{t("profile.lifetime")}</div>
           </div>
         </div>
       )}
