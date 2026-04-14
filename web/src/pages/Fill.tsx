@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, type FormEvent } from "react"
 import { useTranslation } from "react-i18next";
 import { streamFill } from "../lib/api";
 import { StreamingOutput } from "../components/StreamingOutput";
-import { VoiceInput } from "../components/VoiceInput";
+import { ChatInput } from "../components/ChatInput";
 import { CopyButton } from "../components/CopyButton";
 import {
   generateSessionId,
@@ -185,12 +185,6 @@ export function Fill() {
     abortRef.current?.abort();
   }, []);
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSubmit();
-    }
-  };
 
   const hasHistory = isOPFSAvailable() || sessions.length > 0;
 
@@ -364,60 +358,19 @@ export function Fill() {
 
         {/* Input area */}
         <div className="p-4 pb-5">
-          <form onSubmit={handleSubmit} className="max-w-3xl mx-auto">
-            <div className="rounded-2xl border border-gray-200 bg-white shadow-sm focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-transparent transition-shadow">
-              <textarea
-                ref={inputRef}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder={t("fill.inputPlaceholder")}
-                rows={3}
-                disabled={isStreaming}
-                className="w-full resize-none px-4 pt-3 pb-1 text-sm focus:outline-none bg-transparent disabled:opacity-50"
-              />
-              <div className="flex items-center justify-end px-3 pb-2.5 gap-1">
-                <VoiceInput onTranscript={setInput} disabled={isStreaming} />
-                {isStreaming ? (
-                  <button
-                    type="button"
-                    onClick={handleStop}
-                    className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-600 text-white hover:bg-gray-700 transition-colors shrink-0"
-                    title="Stop generating"
-                  >
-                    <svg
-                      width="14"
-                      height="14"
-                      viewBox="0 0 24 24"
-                      fill="currentColor"
-                    >
-                      <rect x="4" y="4" width="16" height="16" rx="2" />
-                    </svg>
-                  </button>
-                ) : (
-                  <button
-                    type="submit"
-                    disabled={!input.trim()}
-                    className="w-8 h-8 flex items-center justify-center rounded-full bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-400 transition-colors shrink-0"
-                    title={t("fill.send")}
-                  >
-                    <svg
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2.5"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <path d="M12 19V5M5 12l7-7 7 7" />
-                    </svg>
-                  </button>
-                )}
-              </div>
-            </div>
-          </form>
+          <div className="max-w-3xl mx-auto">
+            <ChatInput
+              value={input}
+              onChange={setInput}
+              onSubmit={handleSubmit}
+              onStop={handleStop}
+              disabled={isStreaming}
+              placeholder={t("fill.inputPlaceholder")}
+              rows={3}
+              submitLabel={t("fill.send")}
+              textareaRef={inputRef}
+            />
+          </div>
         </div>
       </div>
     </div>

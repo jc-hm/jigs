@@ -18,6 +18,7 @@ import {
   fileMkdir,
   streamAgent,
 } from "../lib/api";
+import { ChatInput } from "../components/ChatInput";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -811,12 +812,6 @@ export function Templates({ initialPath }: TemplatesProps) {
     [input, isProcessing, messages, refreshTree, selectFile, t]
   );
 
-  const handleChatKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
 
   // -------------------------------------------------------------------------
   // Context menu actions
@@ -1074,25 +1069,16 @@ export function Templates({ initialPath }: TemplatesProps) {
         )}
 
         <div className="p-3 border-t border-gray-200">
-          <form onSubmit={handleSend} className="flex gap-2">
-            <textarea
-              ref={inputRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleChatKeyDown}
-              placeholder={t("tmpl.agentPlaceholder")}
-              rows={2}
-              disabled={isProcessing}
-              className="flex-1 resize-none rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50"
-            />
-            <button
-              type="submit"
-              disabled={!input.trim() || isProcessing}
-              className="self-end px-3 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
-            >
-              {t("tmpl.send")}
-            </button>
-          </form>
+          <ChatInput
+            value={input}
+            onChange={setInput}
+            onSubmit={handleSend}
+            disabled={isProcessing}
+            placeholder={t("tmpl.agentPlaceholder")}
+            rows={2}
+            submitLabel={t("tmpl.send")}
+            textareaRef={inputRef}
+          />
         </div>
       </div>
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getCurrentUserId } from "../lib/auth";
 
@@ -26,12 +26,14 @@ function storageKey(key: string): string {
 interface VoiceInputProps {
   onTranscript: (text: string) => void;
   disabled?: boolean;
+  /** When provided, the textarea is focused as soon as recording starts so the
+   *  browser registers a text-input target and delivers transcription results. */
+  inputRef?: React.RefObject<HTMLTextAreaElement>;
 }
 
-export function VoiceInput({ onTranscript, disabled }: VoiceInputProps) {
-  const { t, i18n } = useTranslation();
+export function VoiceInput({ onTranscript, disabled, inputRef }: VoiceInputProps) {
+  const { t } = useTranslation();
   const [isListening, setIsListening] = useState(false);
-  const [soundLevel, setSoundLevel] = useState(0);
   const [showMenu, setShowMenu] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
@@ -50,6 +52,13 @@ export function VoiceInput({ onTranscript, disabled }: VoiceInputProps) {
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const animFrameRef = useRef<number>(0);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  // Direct DOM refs for level indicators — updated in the RAF loop to avoid
+  // going through React's render cycle, giving true 60fps visual updates.
+  const levelBarRef = useRef<HTMLDivElement>(null);
+  const dot0Ref = useRef<HTMLDivElement>(null);
+  const dot1Ref = useRef<HTMLDivElement>(null);
+  const dot2Ref = useRef<HTMLDivElement>(null);
 
   // Enumerate devices on mount (labels may be empty until permission granted)
   useEffect(() => {
@@ -87,7 +96,7 @@ export function VoiceInput({ onTranscript, disabled }: VoiceInputProps) {
     const recognition = new SR();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = langMap[i18n.language] ?? "en-US";
+    recognition.lang = selectedLang;
 
     recognition.onresult = (event: SpeechRecognitionInstance) => {
       let transcript = "";
@@ -128,10 +137,16 @@ export function VoiceInput({ onTranscript, disabled }: VoiceInputProps) {
       audioContextRef.current = null;
     }
     analyserRef.current = null;
-    setSoundLevel(0);
+    // Reset visual indicators
+    if (levelBarRef.current) levelBarRef.current.style.width = "0%";
+    if (dot0Ref.current) dot0Ref.current.style.height = "3px";
+    if (dot1Ref.current) dot1Ref.current.style.height = "3px";
+    if (dot2Ref.current) dot2Ref.current.style.height = "3px";
   }
 
   const startAudioCapture = useCallback(async () => {
+    // Clean up any existing capture first (e.g. device switch while menu is open)
+    cleanupAudio();
     try {
       const constraints: MediaStreamConstraints = {
         audio: selectedDeviceId
@@ -146,7 +161,9 @@ export function VoiceInput({ onTranscript, disabled }: VoiceInputProps) {
       const source = ctx.createMediaStreamSource(stream);
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 256;
-      analyser.smoothingTimeConstant = 0.8;
+      // Lower smoothing = faster response; 0.4 is a good balance between
+      // smoothness and liveness for a level indicator.
+      analyser.smoothingTimeConstant = 0.4;
       source.connect(analyser);
       analyserRef.current = analyser;
 
@@ -159,18 +176,39 @@ export function VoiceInput({ onTranscript, disabled }: VoiceInputProps) {
         analyser.getByteFrequencyData(dataArray);
         let sum = 0;
         for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
-        const avg = sum / dataArray.length / 255;
-        setSoundLevel(avg);
+        const level = sum / dataArray.length / 255;
+
+        // Bypass React state — write directly to DOM for true 60fps updates
+        if (levelBarRef.current) {
+          levelBarRef.current.style.width = `${Math.min(level * 300, 100)}%`;
+        }
+        const scaled = Math.min(level * 3, 1);
+        if (dot0Ref.current) dot0Ref.current.style.height = `${Math.max(3, scaled * 14)}px`;
+        if (dot1Ref.current) dot1Ref.current.style.height = `${Math.max(3, scaled * 18)}px`;
+        if (dot2Ref.current) dot2Ref.current.style.height = `${Math.max(3, scaled * 12)}px`;
+
         animFrameRef.current = requestAnimationFrame(tick);
       };
       tick();
     } catch {
-      // getUserMedia failed — sound level won't be shown but speech
+      // getUserMedia failed — level indicator won't work but speech
       // recognition still works via its own mic access
     }
   }, [selectedDeviceId]);
 
-  const toggle = useCallback(() => {
+  // While the settings menu is open, run audio capture so the level meter
+  // shows real-time input — lets the user verify the selected mic works
+  // before starting a recording. Also restarts when the selected device
+  // changes so the meter switches immediately (not just on next recording).
+  useEffect(() => {
+    if (showMenu && !isListening) {
+      startAudioCapture();
+      return () => cleanupAudio();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showMenu, selectedDeviceId]);
+
+  const toggle = useCallback(async () => {
     if (!recognitionRef.current) return;
     if (isListening) {
       recognitionRef.current.stop();
@@ -178,15 +216,22 @@ export function VoiceInput({ onTranscript, disabled }: VoiceInputProps) {
       setIsListening(false);
     } else {
       recognitionRef.current.lang = selectedLang;
+      // Acquire the selected mic before starting recognition — establishing
+      // the getUserMedia stream first may cause Chrome/Safari to route the
+      // Speech API to the same device instead of the system default.
+      await startAudioCapture();
+      // Focus the target textarea so the browser registers a text-input
+      // context and reliably delivers transcription results to our handler.
+      inputRef?.current?.focus();
       try {
         recognitionRef.current.start();
       } catch {
-        return; // may throw if recognition is still stopping
+        cleanupAudio();
+        return;
       }
-      startAudioCapture();
       setIsListening(true);
     }
-  }, [isListening, selectedLang, startAudioCapture]);
+  }, [isListening, selectedLang, inputRef, startAudioCapture]);
 
   const supported =
     typeof window !== "undefined" &&
@@ -201,7 +246,13 @@ export function VoiceInput({ onTranscript, disabled }: VoiceInputProps) {
       onMouseLeave={() => setIsHovered(false)}
     >
       {/* Animated sound-level dots (visible while recording) */}
-      {isListening && <SoundDots level={soundLevel} />}
+      {isListening && (
+        <div className="flex items-center gap-[3px] h-5 mr-0.5">
+          <div ref={dot0Ref} className="w-[3px] bg-blue-500 rounded-full transition-none" style={{ height: "3px" }} />
+          <div ref={dot1Ref} className="w-[3px] bg-blue-500 rounded-full transition-none" style={{ height: "3px" }} />
+          <div ref={dot2Ref} className="w-[3px] bg-blue-500 rounded-full transition-none" style={{ height: "3px" }} />
+        </div>
+      )}
 
       {/* Arrow + mic wrapper */}
       <div className="relative flex items-center" ref={menuRef}>
@@ -244,7 +295,7 @@ export function VoiceInput({ onTranscript, disabled }: VoiceInputProps) {
               ? "text-blue-500 hover:text-blue-600"
               : "text-gray-400 hover:text-gray-600"
           } disabled:opacity-50`}
-          title={isListening ? "Stop recording" : "Start voice input"}
+          title={isListening ? t("voice.stopRecording") : t("voice.startInput")}
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -273,8 +324,9 @@ export function VoiceInput({ onTranscript, disabled }: VoiceInputProps) {
               </div>
               <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-blue-500 rounded-full transition-all duration-75"
-                  style={{ width: `${Math.min(soundLevel * 300, 100)}%` }}
+                  ref={levelBarRef}
+                  className="h-full bg-blue-500 rounded-full"
+                  style={{ width: "0%", transition: "none" }}
                 />
               </div>
             </div>
@@ -340,28 +392,6 @@ export function VoiceInput({ onTranscript, disabled }: VoiceInputProps) {
           </div>
         )}
       </div>
-    </div>
-  );
-}
-
-/** Three vertical bars that bounce with the mic input level. Flat when silent. */
-function SoundDots({ level }: { level: number }) {
-  const scaled = Math.min(level * 3, 1);
-  const heights = [
-    Math.max(3, scaled * 14),
-    Math.max(3, scaled * 18),
-    Math.max(3, scaled * 12),
-  ];
-
-  return (
-    <div className="flex items-center gap-[3px] h-5 mr-0.5">
-      {heights.map((h, i) => (
-        <div
-          key={i}
-          className="w-[3px] bg-blue-500 rounded-full transition-all duration-75"
-          style={{ height: `${h}px` }}
-        />
-      ))}
     </div>
   );
 }
