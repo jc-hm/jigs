@@ -142,16 +142,20 @@ export interface StreamEvent {
   usage?: { inputTokens: number; outputTokens: number; modelId: string };
 }
 
-export async function* streamFill(body: {
-  message: string;
-  sessionContext?: string;
-  conversationHistory?: Array<{ role: "user" | "assistant"; text: string }>;
-}): AsyncGenerator<StreamEvent> {
+export async function* streamFill(
+  body: {
+    message: string;
+    sessionContext?: string;
+    conversationHistory?: Array<{ role: "user" | "assistant"; text: string }>;
+  },
+  signal?: AbortSignal,
+): AsyncGenerator<StreamEvent> {
   const headers = await authHeaders();
   const res = await fetch(`${API_BASE}/fill`, {
     method: "POST",
     headers,
     body: JSON.stringify(body),
+    signal,
   });
 
   yield* readSSE<StreamEvent>(res);

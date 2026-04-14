@@ -14,6 +14,7 @@ import { getCurrentUserId } from "./auth";
 export interface SessionMessage {
   role: "user" | "assistant";
   text: string;
+  interrupted?: boolean;
 }
 
 export interface Session {
