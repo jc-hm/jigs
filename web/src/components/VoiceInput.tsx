@@ -28,7 +28,7 @@ interface VoiceInputProps {
   disabled?: boolean;
   /** When provided, the textarea is focused as soon as recording starts so the
    *  browser registers a text-input target and delivers transcription results. */
-  inputRef?: React.RefObject<HTMLTextAreaElement>;
+  inputRef?: React.RefObject<HTMLTextAreaElement | null>;
 }
 
 export function VoiceInput({ onTranscript, disabled, inputRef }: VoiceInputProps) {

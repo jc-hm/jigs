@@ -13,7 +13,7 @@ interface ChatInputProps {
   rows?: number;
   submitLabel: string;
   /** Forward a ref to the internal textarea so callers can focus it. */
-  textareaRef?: RefObject<HTMLTextAreaElement>;
+  textareaRef?: RefObject<HTMLTextAreaElement | null>;
 }
 
 export function ChatInput({
@@ -28,7 +28,7 @@ export function ChatInput({
   textareaRef: externalRef,
 }: ChatInputProps) {
   const internalRef = useRef<HTMLTextAreaElement>(null);
-  const inputRef = (externalRef ?? internalRef) as RefObject<HTMLTextAreaElement>;
+  const inputRef = (externalRef ?? internalRef) as RefObject<HTMLTextAreaElement | null>;
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
