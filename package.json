@@ -9,7 +9,9 @@
     "test": "pnpm --filter api test",
     "test:integration": "pnpm --filter api test:integration",
     "test:staging": "pnpm --filter api test:staging",
-    "test:prod": "pnpm --filter api test:prod"
+    "test:prod": "pnpm --filter api test:prod",
+    "deploy:staging": "pnpm --filter api build && pnpm --filter web build && pnpm --filter @jigs/cdk deploy:staging -- --require-approval never",
+    "deploy:prod": "pnpm --filter api build && pnpm --filter web build && pnpm --filter @jigs/cdk deploy:prod -- --require-approval never"
   },
   "engines": {
     "node": ">=20"

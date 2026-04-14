@@ -42,14 +42,12 @@ pnpm --filter api dev                # API at :3000 (mock AI)
 pnpm --filter api dev:ollama         # API at :3000 (local Ollama AI)
 pnpm --filter web dev                # Web at :5173 (proxies to :3000)
 pnpm -r typecheck                    # Type-check all workspaces
-pnpm --filter api build              # Bundle Lambda for deploy
-pnpm --filter web build              # Build SPA
 pnpm test                            # Unit tests (no Docker)
 pnpm test:integration                # Integration tests (needs Docker)
 pnpm test:staging                    # Smoke tests against staging (needs TARGET_URL, AUTH_TOKEN)
 pnpm test:prod                       # Smoke tests against prod
-pnpm --filter @jigs/cdk deploy:staging   # Deploy staging (us-west-2)
-pnpm --filter @jigs/cdk deploy:prod      # Deploy production (eu-central-1)
+pnpm deploy:staging                  # Build api+web then deploy staging (us-west-2)
+pnpm deploy:prod                     # Build api+web then deploy production (eu-central-1)
 ```
 
 ## Conventions
