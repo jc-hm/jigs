@@ -1,7 +1,9 @@
 import type { AIFiller, FillChunk } from "./types.js";
 import type { TrackedBedrock } from "../billing/tracked-bedrock.js";
 
-const MODEL_ID = "us.anthropic.claude-sonnet-4-20250514-v1:0";
+import { config } from "../../env.js";
+const MODEL_PREFIX = config.region.startsWith("eu-") ? "eu" : "us";
+const MODEL_ID = `${MODEL_PREFIX}.anthropic.claude-sonnet-4-20250514-v1:0`;
 
 export function makeBedrockFiller(tracker: TrackedBedrock): AIFiller {
   return {

@@ -1,7 +1,9 @@
 import type { AIRouter, RouterResult } from "./types.js";
 import type { TrackedBedrock } from "../billing/tracked-bedrock.js";
 
-const MODEL_ID = "us.anthropic.claude-haiku-4-5-20251001-v1:0";
+import { config } from "../../env.js";
+const MODEL_PREFIX = config.region.startsWith("eu-") ? "eu" : "us";
+const MODEL_ID = `${MODEL_PREFIX}.anthropic.claude-haiku-4-5-20251001-v1:0`;
 
 export function buildRouterPrompt(
   filenames: string[],

@@ -10,7 +10,11 @@ import type { AgentAction } from "../files/types.js";
 import type { TrackedBedrock } from "../billing/tracked-bedrock.js";
 import { log, preview } from "../../lib/log.js";
 
-const MODEL_ID = "us.anthropic.claude-sonnet-4-20250514-v1:0";
+// Bedrock cross-region inference requires a region prefix (us./eu.) that must
+// match the deployed region. AWS_REGION is set automatically by Lambda runtime.
+import { config } from "../../env.js";
+const MODEL_PREFIX = config.region.startsWith("eu-") ? "eu" : "us";
+const MODEL_ID = `${MODEL_PREFIX}.anthropic.claude-sonnet-4-20250514-v1:0`;
 // Upper bound on agent loop iterations. Each round = one Bedrock call.
 // Bumped from 10 after a 30-template bulk-create request exhausted the
 // budget. The real fix is parallel tool use (see the system prompt) —
