@@ -7,22 +7,28 @@ import { app } from "./app.js";
 // NOT the regular:       handler(event, context, callback)
 //
 // For Lambda to use the streaming protocol, the exported handler must carry
-// Symbol.for("aws.lambda.runtime.handler.streaming") = true — the same marker
-// that awslambda.streamifyResponse (used internally by Hono's streamHandle)
-// sets. Without this marker, Lambda uses regular invocation and passes the
-// LambdaContext as the second argument instead of a writable responseStream,
-// causing "responseStream.end is not a function".
+// Symbol.for("aws.lambda.runtime.handler.streaming") set to the runtime's
+// StreamingMode.RESPONSE_STREAM enum value. Hono's streamHandle() sets this
+// internally via awslambda.streamifyResponse(). Without the marker, Lambda
+// uses regular invocation and passes LambdaContext as the second argument
+// instead of a writable responseStream → "responseStream.end is not a function".
+//
+// Setting the symbol to `true` (instead of the enum value) triggers a
+// validation path in the runtime that throws MalformedStreamingHandler.
+// The correct approach: copy the exact symbol value Hono already set.
 //
 // Cognito Post-Confirmation triggers invoke the same Lambda function via
-// regular (non-streaming) invocation. In that case Lambda still calls our
-// handler with (event, context) — no responseStream. We detect trigger events
-// by shape and return before touching the stream arguments.
+// regular (non-streaming) invocation. Lambda calls the handler with (event,
+// context) only — no responseStream. We detect trigger events by shape and
+// return before touching the stream arguments.
 const honoStreamHandler = streamHandle(app);
+
+const STREAM_SYM = Symbol.for("aws.lambda.runtime.handler.streaming");
 
 async function routingHandler(
   event: LambdaEvent | Record<string, unknown>,
-  // In streaming mode this is ResponseStream; for Cognito triggers it's LambdaContext.
-  // We only pass it through to honoStreamHandler for HTTP events.
+  // In streaming mode: ResponseStream. For Cognito triggers: LambdaContext.
+  // Only forwarded to honoStreamHandler for HTTP events.
   responseStreamOrContext: unknown,
   contextOrUndefined: LambdaContext | undefined,
 ): Promise<unknown> {
@@ -51,8 +57,10 @@ async function routingHandler(
   );
 }
 
-// Mark as streaming handler so Lambda provides responseStream as second arg.
+// Copy the StreamingMode.RESPONSE_STREAM marker from honoStreamHandler to our
+// routing wrapper. This is the value set by awslambda.streamifyResponse() —
+// it must be the exact enum value the runtime expects, not a plain boolean.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-((routingHandler as any)[Symbol.for("aws.lambda.runtime.handler.streaming")] = true);
+(routingHandler as any)[STREAM_SYM] = (honoStreamHandler as any)[STREAM_SYM];
 
 export const handler = routingHandler;
