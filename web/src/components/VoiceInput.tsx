@@ -23,6 +23,15 @@ function storageKey(key: string): string {
   return `jigs:voice:${getCurrentUserId()}:${key}`;
 }
 
+function getBrowserLocale(): string {
+  const nav = navigator.language || "en-US";
+  const exact = LANGUAGES.find((l) => l.code === nav);
+  if (exact) return exact.code;
+  const prefix = nav.split("-")[0].toLowerCase();
+  const match = LANGUAGES.find((l) => l.code.toLowerCase().startsWith(prefix + "-"));
+  return match ? match.code : "en-US";
+}
+
 interface VoiceInputProps {
   onTranscript: (text: string) => void;
   disabled?: boolean;
@@ -42,8 +51,11 @@ export function VoiceInput({ onTranscript, disabled, inputRef }: VoiceInputProps
   const [selectedDeviceId, setSelectedDeviceId] = useState(
     () => localStorage.getItem(storageKey("deviceId")) || "",
   );
+  const [langExplicit, setLangExplicit] = useState(
+    () => localStorage.getItem(storageKey("lang")) !== null,
+  );
   const [selectedLang, setSelectedLang] = useState(
-    () => localStorage.getItem(storageKey("lang")) || "en-US",
+    () => localStorage.getItem(storageKey("lang")) ?? getBrowserLocale(),
   );
 
   const recognitionRef = useRef<SpeechRecognitionInstance>(null);
@@ -87,8 +99,10 @@ export function VoiceInput({ onTranscript, disabled, inputRef }: VoiceInputProps
   }, [selectedDeviceId]);
 
   useEffect(() => {
-    localStorage.setItem(storageKey("lang"), selectedLang);
-  }, [selectedLang]);
+    if (langExplicit) {
+      localStorage.setItem(storageKey("lang"), selectedLang);
+    }
+  }, [selectedLang, langExplicit]);
 
   // Setup SpeechRecognition once — lang is set before each start() call
   useEffect(() => {
@@ -400,7 +414,7 @@ export function VoiceInput({ onTranscript, disabled, inputRef }: VoiceInputProps
                       type="radio"
                       name="voice-lang"
                       checked={lang.code === selectedLang}
-                      onChange={() => setSelectedLang(lang.code)}
+                      onChange={() => { setSelectedLang(lang.code); setLangExplicit(true); }}
                       className="accent-blue-500"
                     />
                     {lang.label}
