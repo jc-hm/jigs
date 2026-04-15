@@ -244,6 +244,25 @@ export async function fileMkdir(path: string): Promise<void> {
   });
 }
 
+// --- Invites ---
+
+export async function createInvite(
+  shareTemplates: boolean,
+): Promise<{ code: string; expiresAt: string }> {
+  return apiFetch("/invites", {
+    method: "POST",
+    body: JSON.stringify({ shareTemplates }),
+  });
+}
+
+/** Public — no auth required. */
+export async function getInvite(
+  code: string,
+): Promise<{ valid: boolean; expiresAt?: string }> {
+  const res = await fetch(`/api/invites/${encodeURIComponent(code)}`);
+  return res.json();
+}
+
 export async function* streamAgent(body: {
   message: string;
   conversationHistory?: Array<{ role: "user" | "assistant"; text: string }>;

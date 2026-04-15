@@ -5,6 +5,7 @@ import { authMiddleware } from "./middleware/auth.js";
 import { fill } from "./routes/fill.js";
 import { templates } from "./routes/templates.js";
 import { billing } from "./routes/billing.js";
+import { invites } from "./routes/invites.js";
 import { config } from "./env.js";
 import { log } from "./lib/log.js";
 import type { AppEnv } from "./types.js";
@@ -41,11 +42,21 @@ app.get("/api/config", (c) => {
   });
 });
 
+// Public invite validation — registered before auth middleware so no token needed.
+app.get("/api/invites/:code", async (c) => {
+  const { getInvite } = await import("./db/entities.js");
+  const code = c.req.param("code");
+  const invite = await getInvite(code);
+  if (!invite) return c.json({ valid: false });
+  return c.json({ valid: true, expiresAt: invite.expiresAt });
+});
+
 // --- Protected routes ---
 app.use("/api/*", authMiddleware);
 app.route("/api/v1/fill", fill);
 app.route("/api/v1/templates", templates);
 app.route("/api/v1/billing", billing);
+app.route("/api/v1/invites", invites);
 
 // --- Global error handler ---
 // Hono's default 500 handler swallows the stack — that's why our prior

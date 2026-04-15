@@ -85,7 +85,12 @@ The goal: the user should be able to say "something weird happened in the templa
 
 ## Sharing & Collaboration
 
-- **Invitation-based template sharing**: today templates are strictly scoped to `{userId}/templates/`. Let a user invite another user (by email) to share a template (or a folder of templates). Requires: a sharing model in DynamoDB (share records keyed by inviter + invitee), an invitation flow (email via Cognito or SES), and lookup logic in the S3 file ops so reads check shared prefixes as well as the user's own. Non-trivial; capture for later.
+Invite-based onboarding (copy inviter's templates on signup) is implemented — see `docs/signup-flow.md`. Remaining items:
+
+- **Invite analytics**: track how many users each invite code has been claimed by. Add `claimedCount` (atomic increment) to the `INVITE#` record. Surface in Profile ("your link has been used N times").
+- **Pre-signup Cognito gate**: currently the signup form is hidden by URL param only (client-side). For stronger access control, add a Cognito Pre-Signup Lambda trigger that rejects signups without a valid `custom:invite_code` (unless an admin bypass attribute is set). Hardening step for when the pilot becomes closed beta.
+- **Multi-user orgs**: today each user gets their own org. Invite into a shared org (same template namespace, shared balance). Requires: org membership model in DynamoDB, shared S3 prefix (`{orgId}/templates/` instead of `{userId}/templates/`), role-based access (admin can manage templates, users fill only). Significant architectural change.
+- **Live template sync**: currently invited users get a snapshot at signup. If the inviter updates templates later, invitees don't see the changes. Shared-org model (above) solves this; alternatively, a "sync from inviter" button could re-run the copy on demand.
 
 ## Dev Tooling
 

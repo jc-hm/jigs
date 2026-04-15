@@ -95,6 +95,15 @@
   "profile.remainingCredit": "remaining credit",
   "profile.totalReports": "Total Reports",
   "profile.lifetime": "lifetime",
+  "profile.inviteTitle": "Invite a friend",
+  "profile.shareTemplates": "Share my templates with invited users",
+  "profile.generateLink": "Generate invite link",
+  "profile.generating": "Generating…",
+  "profile.inviteExpiry": "Expires {{date}}",
+  "profile.copyLink": "Copy link",
+  "profile.linkCopied": "Copied!",
+
+  "auth.inviteBanner": "Your templates are being set up — they'll appear in a moment.",
 
   "output.templateLabel": "Template:",
   "output.matchedTemplate": "matched template",

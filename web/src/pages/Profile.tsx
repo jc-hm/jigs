@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { apiFetch, ApiError } from "../lib/api";
+import { apiFetch, ApiError, createInvite } from "../lib/api";
 
 interface Usage {
   balance: {
@@ -106,6 +106,93 @@ export function Profile() {
             <div className="text-xs text-gray-400">{t("profile.lifetime")}</div>
           </div>
         </div>
+      )}
+
+      <InviteSection />
+    </div>
+  );
+}
+
+function InviteSection() {
+  const { t } = useTranslation();
+  const [shareTemplates, setShareTemplates] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<{ code: string; expiresAt: string } | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const inviteUrl = result
+    ? `${window.location.origin}${window.location.pathname}?invite=${result.code}`
+    : "";
+
+  const handleGenerate = async () => {
+    setLoading(true);
+    setError(null);
+    setResult(null);
+    try {
+      const data = await createInvite(shareTemplates);
+      setResult(data);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to generate link");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(inviteUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="mt-6 bg-white border border-gray-200 rounded-lg p-4">
+      <h2 className="text-sm font-medium text-gray-700 mb-3">{t("profile.inviteTitle")}</h2>
+
+      <label className="flex items-center gap-2 text-sm text-gray-600 mb-4 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={shareTemplates}
+          onChange={(e) => setShareTemplates(e.target.checked)}
+          className="accent-blue-500"
+        />
+        {t("profile.shareTemplates")}
+      </label>
+
+      {error && (
+        <p className="text-red-600 text-xs mb-3">{error}</p>
+      )}
+
+      {result ? (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              readOnly
+              value={inviteUrl}
+              className="flex-1 px-3 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-700 bg-gray-50 focus:outline-none"
+            />
+            <button
+              onClick={handleCopy}
+              className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 transition-colors"
+            >
+              {copied ? t("profile.linkCopied") : t("profile.copyLink")}
+            </button>
+          </div>
+          <p className="text-xs text-gray-400">
+            {t("profile.inviteExpiry", {
+              date: new Date(result.expiresAt).toLocaleDateString(),
+            })}
+          </p>
+        </div>
+      ) : (
+        <button
+          onClick={handleGenerate}
+          disabled={loading}
+          className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50"
+        >
+          {loading ? t("profile.generating") : t("profile.generateLink")}
+        </button>
       )}
     </div>
   );

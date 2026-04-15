@@ -13,6 +13,7 @@ import {
   resendCode,
   signOut,
 } from "./lib/auth";
+import { getInvite } from "./lib/api";
 
 type Page = "fill" | "templates" | "profile";
 type AuthState = "loading" | "authenticated" | "unauthenticated" | "error";
@@ -36,12 +37,37 @@ function parseHash(): { page: Page; subpath: string } {
   return { page, subpath };
 }
 
+// Invite-only access model:
+//   ?invite=CODE  → show signup form; capture code for template bootstrapping
+//   ?signup=1     → show signup form (undocumented open-registration backdoor)
+//   (nothing)     → show login form only
+const OPEN_SIGNUP_PARAM = "jigs-open";
+
+function readAndStripUrlParams(): { inviteCode: string | null; showSignup: boolean } {
+  const params = new URLSearchParams(window.location.search);
+  const inviteCode = params.get("invite");
+  const hasSignup = Boolean(inviteCode || params.get("signup") === OPEN_SIGNUP_PARAM);
+
+  if (inviteCode) sessionStorage.setItem("jigs:pendingInvite", inviteCode);
+
+  if (params.has("invite") || params.has("signup")) {
+    history.replaceState({}, "", window.location.pathname + window.location.hash);
+  }
+
+  return { inviteCode, showSignup: hasSignup };
+}
+
 function App() {
   const { t } = useTranslation();
   const [authState, setAuthState] = useState<AuthState>("loading");
   const [authError, setAuthError] = useState("");
   const [route, setRoute] = useState(parseHash);
   const { page } = route;
+  const [inviteBanner, setInviteBanner] = useState<string | null>(null);
+
+  // Read URL params once on mount — must run before auth check so the invite
+  // code lands in sessionStorage before the user flow proceeds.
+  const [signupParams] = useState(readAndStripUrlParams);
 
   // Check auth on mount
   useEffect(() => {
@@ -87,9 +113,22 @@ function App() {
     [route.page]
   );
 
-  const handleSignedIn = useCallback(() => {
+  const handleSignedIn = useCallback(async () => {
     setAuthState("authenticated");
-  }, []);
+    // Check for a pending invite and show a banner if it's valid.
+    const code = sessionStorage.getItem("jigs:pendingInvite");
+    if (code) {
+      sessionStorage.removeItem("jigs:pendingInvite");
+      try {
+        const result = await getInvite(code);
+        if (result.valid) {
+          setInviteBanner(t("auth.inviteBanner"));
+        }
+      } catch {
+        // Non-critical — skip banner silently
+      }
+    }
+  }, [t]);
 
   const handleSignOut = useCallback(() => {
     signOut();
@@ -125,7 +164,13 @@ function App() {
   }
 
   if (authState === "unauthenticated") {
-    return <AuthScreen onSignedIn={handleSignedIn} />;
+    return (
+      <AuthScreen
+        onSignedIn={handleSignedIn}
+        initialMode={signupParams.showSignup ? "signup" : "signin"}
+        inviteCode={signupParams.inviteCode ?? undefined}
+      />
+    );
   }
 
   return (
@@ -157,6 +202,20 @@ function App() {
         </button>
       </header>
 
+      {/* Invite bootstrap banner */}
+      {inviteBanner && (
+        <div className="bg-blue-50 border-b border-blue-200 px-4 py-2 flex items-center justify-between text-sm text-blue-700">
+          <span>{inviteBanner}</span>
+          <button
+            onClick={() => setInviteBanner(null)}
+            className="ml-4 text-blue-500 hover:text-blue-700"
+            aria-label="Dismiss"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Main content */}
       <main className="flex-1 overflow-hidden">
         {page === "fill" && <Fill />}
@@ -175,9 +234,17 @@ function App() {
 
 type AuthMode = "signin" | "signup" | "verify";
 
-function AuthScreen({ onSignedIn }: { onSignedIn: () => void }) {
+function AuthScreen({
+  onSignedIn,
+  initialMode = "signin",
+  inviteCode,
+}: {
+  onSignedIn: () => void;
+  initialMode?: AuthMode;
+  inviteCode?: string;
+}) {
   const { t } = useTranslation();
-  const [mode, setMode] = useState<AuthMode>("signin");
+  const [mode, setMode] = useState<AuthMode>(initialMode);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
@@ -210,7 +277,7 @@ function AuthScreen({ onSignedIn }: { onSignedIn: () => void }) {
     setError("");
     setLoading(true);
     try {
-      await signUp(email, password);
+      await signUp(email, password, inviteCode);
       setMode("verify");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : t("auth.signUpFailed"));
@@ -285,19 +352,21 @@ function AuthScreen({ onSignedIn }: { onSignedIn: () => void }) {
             >
               {loading ? t("auth.signingIn") : t("auth.signIn")}
             </button>
-            <p className="text-center text-xs text-gray-500">
-              {t("auth.noAccount")}{" "}
-              <button
-                type="button"
-                onClick={() => {
-                  setMode("signup");
-                  setError("");
-                }}
-                className="text-blue-600 hover:underline"
-              >
-                {t("auth.signUp")}
-              </button>
-            </p>
+            {initialMode === "signup" && (
+              <p className="text-center text-xs text-gray-500">
+                {t("auth.noAccount")}{" "}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode("signup");
+                    setError("");
+                  }}
+                  className="text-blue-600 hover:underline"
+                >
+                  {t("auth.signUp")}
+                </button>
+              </p>
+            )}
           </form>
         )}
 

@@ -191,6 +191,50 @@ export async function mkdir(userId: string, path: string): Promise<void> {
 }
 
 /**
+ * Copy all template files from one user's prefix to another.
+ * Used during invite-based onboarding to bootstrap new users with the
+ * inviter's templates. Same-bucket CopyObject — server-side, no data egress.
+ * Returns the number of objects copied.
+ */
+export async function copyUserTemplates(
+  fromUserId: string,
+  toUserId: string,
+): Promise<number> {
+  const bucket = config.templateBucket;
+  const srcPrefix = `${fromUserId}/templates/`;
+  let count = 0;
+  let continuationToken: string | undefined;
+
+  do {
+    const res = await s3.send(
+      new ListObjectsV2Command({
+        Bucket: bucket,
+        Prefix: srcPrefix,
+        ContinuationToken: continuationToken,
+      })
+    );
+
+    for (const obj of res.Contents || []) {
+      if (!obj.Key) continue;
+      const relPath = obj.Key.slice(srcPrefix.length);
+      if (!relPath) continue;
+      await s3.send(
+        new CopyObjectCommand({
+          Bucket: bucket,
+          CopySource: `${bucket}/${obj.Key}`,
+          Key: `${toUserId}/templates/${relPath}`,
+        })
+      );
+      count++;
+    }
+
+    continuationToken = res.NextContinuationToken;
+  } while (continuationToken);
+
+  return count;
+}
+
+/**
  * Walk up the folder hierarchy from a template's location to find the
  * nearest AUTHOR.md. Returns its content, or undefined if none found.
  *

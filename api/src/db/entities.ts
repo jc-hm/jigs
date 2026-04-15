@@ -8,6 +8,15 @@ import { db, TABLE_NAME } from "./client.js";
 
 // --- Types ---
 
+export interface Invite {
+  code: string;
+  fromUserId: string;
+  expiresAt: string;
+  shareTemplates: boolean;
+}
+
+// --- Org / User types ---
+
 export interface Org {
   id: string;
   name: string;
@@ -310,4 +319,58 @@ export async function deductBalance(
       },
     })
   );
+}
+
+// --- Invites ---
+
+/**
+ * Create a time-limited invite code tied to the inviting user's templates.
+ * DynamoDB TTL auto-expires the record after `ttlDays` days; the in-code
+ * check in `getInvite` provides an eager guard before TTL cleanup runs.
+ */
+export async function createInvite(
+  fromUserId: string,
+  shareTemplates: boolean,
+  ttlDays = 7,
+): Promise<{ code: string; expiresAt: string }> {
+  const code = generateShortId();
+  const expiresAt = new Date(Date.now() + ttlDays * 24 * 60 * 60 * 1000);
+  const expiresAtIso = expiresAt.toISOString();
+  const ttl = Math.floor(expiresAt.getTime() / 1000);
+
+  await db.send(
+    new PutCommand({
+      TableName: TABLE_NAME,
+      Item: {
+        PK: `INVITE#${code}`,
+        SK: "METADATA",
+        fromUserId,
+        expiresAt: expiresAtIso,
+        shareTemplates,
+        TTL: ttl,
+      },
+      ConditionExpression: "attribute_not_exists(PK)",
+    })
+  );
+
+  return { code, expiresAt: expiresAtIso };
+}
+
+/** Return the invite if it exists and has not expired; null otherwise. */
+export async function getInvite(code: string): Promise<Invite | null> {
+  const res = await db.send(
+    new GetCommand({
+      TableName: TABLE_NAME,
+      Key: { PK: `INVITE#${code}`, SK: "METADATA" },
+    })
+  );
+  if (!res.Item) return null;
+  // Eager expiry check — TTL cleanup can lag by up to 48 hours per AWS docs.
+  if (new Date(res.Item.expiresAt) < new Date()) return null;
+  return {
+    code,
+    fromUserId: res.Item.fromUserId,
+    expiresAt: res.Item.expiresAt,
+    shareTemplates: res.Item.shareTemplates,
+  };
 }

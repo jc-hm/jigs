@@ -2,7 +2,7 @@
 
 AI-powered template filling SaaS. First vertical: radiology reports.
 
-> **Product context:** Read `PRODUCT.md` for the product vision, user types, workflows, business model, and guiding principles. Consult it before making product-level decisions or when you need to understand the *why* behind a feature.
+> **Product context:** Read `docs/PRODUCT.md` for the product vision, user types, workflows, business model, and guiding principles. Consult it before making product-level decisions or when you need to understand the *why* behind a feature. `docs/BACKLOG.md` has captured future ideas. `docs/signup-flow.md` documents the full auth + invite onboarding flow.
 
 ## Architecture
 

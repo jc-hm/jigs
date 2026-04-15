@@ -95,6 +95,15 @@
   "profile.remainingCredit": "crédito restante",
   "profile.totalReports": "Informes totales",
   "profile.lifetime": "total histórico",
+  "profile.inviteTitle": "Invitar a un amigo",
+  "profile.shareTemplates": "Compartir mis plantillas con los invitados",
+  "profile.generateLink": "Generar enlace de invitación",
+  "profile.generating": "Generando…",
+  "profile.inviteExpiry": "Expira el {{date}}",
+  "profile.copyLink": "Copiar enlace",
+  "profile.linkCopied": "¡Copiado!",
+
+  "auth.inviteBanner": "Tus plantillas se están configurando — aparecerán en un momento.",
 
   "output.templateLabel": "Plantilla:",
   "output.matchedTemplate": "plantilla usada",

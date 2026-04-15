@@ -77,7 +77,8 @@ function getUserPool(): CognitoUserPool | null {
 
 export function signUp(
   email: string,
-  password: string
+  password: string,
+  inviteCode?: string,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const userPool = getUserPool();
@@ -85,6 +86,9 @@ export function signUp(
 
     const attrs = [
       new CognitoUserAttribute({ Name: "email", Value: email }),
+      ...(inviteCode
+        ? [new CognitoUserAttribute({ Name: "custom:invite_code", Value: inviteCode })]
+        : []),
     ];
 
     userPool.signUp(email, password, attrs, [], (err) => {

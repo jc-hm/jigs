@@ -66,6 +66,10 @@ export class JigsStack extends cdk.Stack {
     });
 
     // --- Cognito User Pool ---
+    // Note: apiFunction is referenced in lambdaTriggers below, but is defined
+    // after this block. CDK resolves the circular reference correctly because
+    // lambdaTriggers takes an IFunction (by reference, not by value).
+    // We use a Lazy reference via a wrapper to break the forward dependency.
     const userPool = new cognito.UserPool(this, "UserPool", {
       userPoolName: `jigs-${stage}`,
       selfSignUpEnabled: true,
@@ -73,6 +77,12 @@ export class JigsStack extends cdk.Stack {
       autoVerify: { email: true },
       standardAttributes: {
         email: { required: true, mutable: true },
+      },
+      customAttributes: {
+        // Captured at signup and read by the Post-Confirmation trigger to
+        // bootstrap new users with the inviter's templates. Immutable after
+        // account creation (Cognito enforces this at the pool level).
+        invite_code: new cognito.StringAttribute({ mutable: false }),
       },
       passwordPolicy: {
         minLength: 8,
@@ -144,6 +154,17 @@ export class JigsStack extends cdk.Stack {
         ],
         resources: ["*"],
       })
+    );
+
+    // Allow the Lambda to invoke itself for async bootstrap jobs (template
+    // copy fired by the Post-Confirmation trigger via InvocationType: "Event").
+    apiFunction.grantInvoke(apiFunction);
+
+    // Post-Confirmation trigger — fires after a user verifies their email.
+    // CDK automatically adds the Cognito → Lambda invoke permission.
+    userPool.addTrigger(
+      cognito.UserPoolOperation.POST_CONFIRMATION,
+      apiFunction,
     );
 
     // --- CloudFront Distribution ---
