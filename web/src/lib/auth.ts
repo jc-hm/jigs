@@ -37,11 +37,17 @@ export async function loadAuthConfig(): Promise<ConfigState> {
       return configState;
     }
     const data = await res.json();
-    if (data.auth) {
+    if (data.auth === null) {
+      // API explicitly returned auth: null → local dev mode (STAGE=local only)
+      configState = { mode: "local" };
+    } else if (data.auth?.userPoolId) {
       configState = { mode: "configured", config: data.auth };
     } else {
-      // API explicitly returned auth: null → local dev mode
-      configState = { mode: "local" };
+      // Unexpected response shape (e.g. Lambda error body) → fail closed, no access granted
+      configState = {
+        mode: "error",
+        message: `Unexpected config response: ${JSON.stringify(data).slice(0, 120)}`,
+      };
     }
   } catch (err) {
     configState = { mode: "error", message: `Config fetch failed: ${err}` };

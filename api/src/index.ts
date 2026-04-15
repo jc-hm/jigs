@@ -2,16 +2,30 @@ import { streamHandle } from "hono/aws-lambda";
 import type { LambdaContext, LambdaEvent } from "hono/aws-lambda";
 import { app } from "./app.js";
 
-// Handler type spelled out inline: LambdaContext and LambdaEvent are
-// publicly exported from hono/aws-lambda, avoiding the TS2742 "cannot
-// be named without a reference to a deep module path" error on export.
-type LambdaCallback = (error?: Error | string | null, result?: unknown) => void;
+// The Lambda Function URL uses RESPONSE_STREAM invoke mode, so the runtime
+// calls the handler as:  handler(event, responseStream, context)
+// NOT the regular:       handler(event, context, callback)
+//
+// For Lambda to use the streaming protocol, the exported handler must carry
+// Symbol.for("aws.lambda.runtime.handler.streaming") = true — the same marker
+// that awslambda.streamifyResponse (used internally by Hono's streamHandle)
+// sets. Without this marker, Lambda uses regular invocation and passes the
+// LambdaContext as the second argument instead of a writable responseStream,
+// causing "responseStream.end is not a function".
+//
+// Cognito Post-Confirmation triggers invoke the same Lambda function via
+// regular (non-streaming) invocation. In that case Lambda still calls our
+// handler with (event, context) — no responseStream. We detect trigger events
+// by shape and return before touching the stream arguments.
+const honoStreamHandler = streamHandle(app);
 
-export const handler = async (
+async function routingHandler(
   event: LambdaEvent | Record<string, unknown>,
-  context: LambdaContext,
-  callback: LambdaCallback,
-): Promise<unknown> => {
+  // In streaming mode this is ResponseStream; for Cognito triggers it's LambdaContext.
+  // We only pass it through to honoStreamHandler for HTTP events.
+  responseStreamOrContext: unknown,
+  contextOrUndefined: LambdaContext | undefined,
+): Promise<unknown> {
   const ev = event as Record<string, unknown>;
 
   // Cognito Post-Confirmation trigger — provision user + fire async bootstrap.
@@ -30,6 +44,15 @@ export const handler = async (
     return { ok: true };
   }
 
-  // Normal HTTP handling via Hono + streaming Lambda Function URL.
-  return streamHandle(app)(event as LambdaEvent, context, callback);
-};
+  // Normal HTTP handling — pass streaming arguments through unchanged.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (honoStreamHandler as (...a: unknown[]) => Promise<unknown>)(
+    event, responseStreamOrContext, contextOrUndefined,
+  );
+}
+
+// Mark as streaming handler so Lambda provides responseStream as second arg.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+((routingHandler as any)[Symbol.for("aws.lambda.runtime.handler.streaming")] = true);
+
+export const handler = routingHandler;
