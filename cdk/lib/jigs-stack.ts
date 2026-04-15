@@ -158,14 +158,50 @@ export class JigsStack extends cdk.Stack {
 
     // Allow the Lambda to invoke itself for async bootstrap jobs (template
     // copy fired by the Post-Confirmation trigger via InvocationType: "Event").
-    apiFunction.grantInvoke(apiFunction);
+    //
+    // We use addToRolePolicy with a concrete ARN string (no CDK token) rather
+    // than grantInvoke(apiFunction). grantInvoke creates a self-referential
+    // dependency: the role policy references apiFunction.functionArn (a CDK
+    // token), which CDK tracks as ServiceRoleDefaultPolicy → ApiFunction, while
+    // CDK also tracks ApiFunction → ServiceRoleDefaultPolicy — a cycle.
+    // Using a plain string ARN avoids CDK token tracking entirely.
+    apiFunction.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ["lambda:InvokeFunction"],
+        resources: [
+          `arn:aws:lambda:${this.region}:${this.account}:function:jigs-api-${stage}`,
+        ],
+      }),
+    );
 
     // Post-Confirmation trigger — fires after a user verifies their email.
-    // CDK automatically adds the Cognito → Lambda invoke permission.
-    userPool.addTrigger(
-      cognito.UserPoolOperation.POST_CONFIRMATION,
-      apiFunction,
+    //
+    // We can't use userPool.addTrigger(apiFunction) here because apiFunction
+    // already depends on userPool (via COGNITO_USER_POOL_ID env var), and
+    // addTrigger would make userPool depend on apiFunction (via functionArn in
+    // lambdaConfig), creating a CloudFormation circular dependency.
+    //
+    // Fix: set lambdaConfig via CfnUserPool escape hatch using a plain-string
+    // ARN (no CDK token → no dependency edge), then add the invoke permission
+    // as a standalone CfnPermission that is NOT a child of apiFunction.
+    // Because this stack has an explicit env (region + account resolved at
+    // synth time), the constructed ARN is a concrete string.
+    const cfnUserPool = userPool.node.defaultChild as cognito.CfnUserPool;
+    cfnUserPool.addPropertyOverride(
+      "LambdaConfig.PostConfirmation",
+      `arn:aws:lambda:${this.region}:${this.account}:function:jigs-api-${stage}`,
     );
+
+    // Grant Cognito permission to invoke the Lambda.
+    // functionName: apiFunction.functionArn (CDK token) creates a natural
+    // CfnPermission → ApiFunction dependency so CloudFormation creates the
+    // Lambda before the permission — no explicit addDependency needed.
+    new lambda.CfnPermission(this, "PostConfirmationTriggerPermission", {
+      action: "lambda:InvokeFunction",
+      functionName: apiFunction.functionArn,
+      principal: "cognito-idp.amazonaws.com",
+      sourceArn: userPool.userPoolArn,
+    });
 
     // --- CloudFront Distribution ---
     const oai = new cloudfront.OriginAccessIdentity(this, "WebOAI");
