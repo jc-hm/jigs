@@ -170,6 +170,16 @@ fill.post("/", async (c) => {
     });
   }
 
+  if (route.intent === "CLARIFY") {
+    const question = route.message || "Could you clarify what you need?";
+    return streamSSE(c, async (s) => {
+      await writeComment(s, "start");
+      await writeEvent(s, { type: "meta", intent: "CLARIFY" });
+      await writeEvent(s, { type: "text", text: question });
+      await writeEvent(s, { type: "done", usage: null });
+    });
+  }
+
   return c.json({ error: `Intent ${route.intent} not yet implemented` }, 501);
 });
 

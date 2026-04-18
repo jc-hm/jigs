@@ -2,8 +2,7 @@ import type { AIFiller, FillChunk } from "./types.js";
 import type { TrackedBedrock } from "../billing/tracked-bedrock.js";
 
 import { config } from "../../env.js";
-const MODEL_PREFIX = config.region.startsWith("eu-") ? "eu" : "us";
-const MODEL_ID = `${MODEL_PREFIX}.anthropic.claude-sonnet-4-20250514-v1:0`;
+const MODEL_ID = config.bedrockModelSonnet;
 
 export function makeBedrockFiller(tracker: TrackedBedrock): AIFiller {
   return {
@@ -18,7 +17,7 @@ export function makeBedrockFiller(tracker: TrackedBedrock): AIFiller {
 Template:
 ${templateContent}
 
-Fill this template based on the user's clinical description. Output only the completed report.`;
+Fill this template based on the user's description. Output only the completed document.`;
 
       const messages: Array<{
         role: "user" | "assistant";

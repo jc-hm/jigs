@@ -1,4 +1,4 @@
-export type Intent = "NEW_FILL" | "REFINE" | "RE_SELECT" | "UPDATE_TMPL";
+export type Intent = "NEW_FILL" | "REFINE" | "RE_SELECT" | "UPDATE_TMPL" | "CLARIFY";
 
 export interface RouterResult {
   intent: Intent;

@@ -142,8 +142,10 @@ export function Fill() {
 
         for await (const event of stream) {
           if (event.type === "meta") {
-            setTemplatePath(event.templatePath);
-            setSessionContext(event.templatePath);
+            if (event.templatePath) {
+              setTemplatePath(event.templatePath);
+              setSessionContext(event.templatePath);
+            }
           } else if (event.type === "text") {
             fullText += event.text || "";
             setOutput(fullText);

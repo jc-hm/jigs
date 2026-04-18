@@ -2,8 +2,7 @@ import type { AIRouter, RouterResult } from "./types.js";
 import type { TrackedBedrock } from "../billing/tracked-bedrock.js";
 
 import { config } from "../../env.js";
-const MODEL_PREFIX = config.region.startsWith("eu-") ? "eu" : "us";
-const MODEL_ID = `${MODEL_PREFIX}.anthropic.claude-haiku-4-5-20251001-v1:0`;
+const MODEL_ID = config.bedrockModelHaiku;
 
 export function buildRouterPrompt(
   filenames: string[],
@@ -13,18 +12,23 @@ export function buildRouterPrompt(
 
   return `You are a routing assistant. Classify the user's message into one of these intents:
 
-NEW_FILL — The user wants to generate a new report. Select the best matching template.
-REFINE — The user wants to modify the current report (change a finding, fix wording, etc).
-RE_SELECT — The user wants a different template for the current study.
+NEW_FILL — The user wants to fill a new document. Select the best matching template.
+REFINE — The user wants to modify the current document (change content, fix wording, etc).
+RE_SELECT — The user wants a different template for the current task.
 UPDATE_TMPL — The user wants to modify the template itself (add/remove sections).
+CLARIFY — You cannot confidently pick a single template (no good match, or multiple templates are too similar). Ask the user a short question to disambiguate.
 
 Available templates:
 ${fileList}
 
 ${sessionContext ? `Current session context: ${sessionContext}` : "No active session."}
 
-Respond with JSON only: {"intent": "NEW_FILL", "templateId": "mri-knee.md"} or {"intent": "REFINE"} etc.
-If intent is NEW_FILL, you MUST include templateId (the exact filename from the list above). For other intents, templateId is optional.`;
+Respond with JSON only.
+- NEW_FILL: {"intent": "NEW_FILL", "templateId": "exact-filename.md"}  (templateId required)
+- REFINE/RE_SELECT/UPDATE_TMPL: {"intent": "REFINE"}  (templateId optional)
+- CLARIFY: {"intent": "CLARIFY", "message": "Short question for the user — do not mention filenames"}
+
+Use CLARIFY only when genuinely unsure. When in doubt between two similar templates, pick the closest one (NEW_FILL).`;
 }
 
 export function makeBedrockRouter(tracker: TrackedBedrock): AIRouter {

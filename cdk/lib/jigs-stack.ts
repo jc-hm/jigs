@@ -11,13 +11,15 @@ import { Construct } from "constructs";
 
 interface JigsStackProps extends cdk.StackProps {
   stage: string;
+  bedrockModelSonnet: string;
+  bedrockModelHaiku: string;
 }
 
 export class JigsStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: JigsStackProps) {
     super(scope, id, props);
 
-    const { stage } = props;
+    const { stage, bedrockModelSonnet, bedrockModelHaiku } = props;
 
     // --- DynamoDB Table (single-table design) ---
     const table = new dynamodb.Table(this, "JigsTable", {
@@ -128,6 +130,8 @@ export class JigsStack extends cdk.Stack {
         TEMPLATE_BUCKET: templateBucket.bucketName,
         COGNITO_USER_POOL_ID: userPool.userPoolId,
         COGNITO_CLIENT_ID: userPoolClient.userPoolClientId,
+        BEDROCK_MODEL_SONNET: bedrockModelSonnet,
+        BEDROCK_MODEL_HAIKU: bedrockModelHaiku,
       },
     });
 
