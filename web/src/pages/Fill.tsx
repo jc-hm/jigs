@@ -23,6 +23,7 @@ export function Fill() {
   const [input, setInput] = useState("");
   const [output, setOutput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
+  const [lastIntent, setLastIntent] = useState<string>();
   const [templatePath, setTemplatePath] = useState<string>();
   const [sessionContext, setSessionContext] = useState<string>();
   const [error, setError] = useState<string>();
@@ -80,6 +81,7 @@ export function Fill() {
     setSessionId(generateSessionId());
     setMessages([]);
     setOutput("");
+    setLastIntent(undefined);
     setTemplatePath(undefined);
     setSessionContext(undefined);
     setError(undefined);
@@ -125,6 +127,7 @@ export function Fill() {
       setError(undefined);
       setIsStreaming(true);
       setOutput("");
+      setLastIntent(undefined);
 
       const controller = new AbortController();
       abortRef.current = controller;
@@ -142,6 +145,7 @@ export function Fill() {
 
         for await (const event of stream) {
           if (event.type === "meta") {
+            setLastIntent(event.intent);
             if (event.templatePath) {
               setTemplatePath(event.templatePath);
               setSessionContext(event.templatePath);
@@ -343,8 +347,9 @@ export function Fill() {
               </div>
             )}
 
-            {/* Current streaming output */}
-            {(output || isStreaming) && (
+            {/* Current streaming output — hidden after a CLARIFY completes
+                since the question is already shown in the conversation history. */}
+            {(output || isStreaming) && !(lastIntent === "CLARIFY" && !isStreaming) && (
               <StreamingOutput
                 text={output}
                 isStreaming={isStreaming}
