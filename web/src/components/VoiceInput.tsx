@@ -120,6 +120,13 @@ export function VoiceInput({ onTranscript, disabled, inputRef }: VoiceInputProps
         transcript += event.results[i][0].transcript;
       }
       onTranscriptRef.current(transcript);
+      // React's controlled textarea doesn't auto-scroll on programmatic value updates.
+      // Flush after the next paint so the new value is in the DOM first.
+      requestAnimationFrame(() => {
+        if (inputRef?.current) {
+          inputRef.current.scrollTop = inputRef.current.scrollHeight;
+        }
+      });
     };
 
     recognition.onerror = () => {
