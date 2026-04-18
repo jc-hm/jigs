@@ -2,6 +2,7 @@ import {
   GetCommand,
   PutCommand,
   QueryCommand,
+  ScanCommand,
   UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
 import { db, TABLE_NAME } from "./client.js";
@@ -31,6 +32,8 @@ export interface User {
   email: string;
   role: "admin" | "user";
   cognitoId: string;
+  lastLoginAt?: string;
+  loggedOutAt?: string;
 }
 
 // --- Org ---
@@ -92,6 +95,8 @@ export async function getUserByCognitoId(
     email: item.email,
     role: item.role,
     cognitoId,
+    lastLoginAt: item.lastLoginAt as string | undefined,
+    loggedOutAt: item.loggedOutAt as string | undefined,
   };
 }
 
@@ -354,6 +359,117 @@ export async function createInvite(
   );
 
   return { code, expiresAt: expiresAtIso };
+}
+
+export async function updateLastLogin(userId: string, orgId: string): Promise<void> {
+  await db.send(
+    new UpdateCommand({
+      TableName: TABLE_NAME,
+      Key: { PK: `ORG#${orgId}`, SK: `USER#${userId}` },
+      UpdateExpression: "SET lastLoginAt = :now",
+      ExpressionAttributeValues: { ":now": new Date().toISOString() },
+    })
+  );
+}
+
+// Stamp a logout time on the user record so auth middleware can reject any
+// token issued before this timestamp, giving true immediate revocation without
+// needing a separate blocklist store. Works because we already do a DynamoDB
+// read per request in getUserByCognitoId — the check is free.
+export async function setLoggedOutAt(userId: string, orgId: string): Promise<void> {
+  await db.send(
+    new UpdateCommand({
+      TableName: TABLE_NAME,
+      Key: { PK: `ORG#${orgId}`, SK: `USER#${userId}` },
+      UpdateExpression: "SET loggedOutAt = :now",
+      ExpressionAttributeValues: { ":now": new Date().toISOString() },
+    })
+  );
+}
+
+// --- Admin queries ---
+
+export interface OrgSummary {
+  orgId: string;
+  name: string;
+  plan: string;
+  balance: OrgBalance;
+}
+
+export async function listAllOrgs(): Promise<OrgSummary[]> {
+  // Scan for METADATA items (org + invite records share this SK).
+  // Filter to ORG# prefix to exclude INVITE# items.
+  const res = await db.send(
+    new ScanCommand({
+      TableName: TABLE_NAME,
+      FilterExpression: "SK = :meta AND begins_with(PK, :orgPrefix)",
+      ExpressionAttributeValues: { ":meta": "METADATA", ":orgPrefix": "ORG#" },
+      ProjectionExpression: "PK, #n, #p",
+      ExpressionAttributeNames: { "#n": "name", "#p": "plan" },
+    })
+  );
+
+  const items = res.Items ?? [];
+  return Promise.all(
+    items.map(async (item) => {
+      const orgId = (item.PK as string).replace("ORG#", "");
+      const balance = await getOrgBalance(orgId);
+      return { orgId, name: item["name"] as string, plan: item["plan"] as string, balance };
+    })
+  );
+}
+
+export async function getUserById(orgId: string, userId: string): Promise<User | undefined> {
+  const res = await db.send(
+    new GetCommand({
+      TableName: TABLE_NAME,
+      Key: { PK: `ORG#${orgId}`, SK: `USER#${userId}` },
+    })
+  );
+  if (!res.Item) return undefined;
+  return {
+    id: userId,
+    orgId,
+    email: res.Item.email as string,
+    role: res.Item.role as "admin" | "user",
+    cognitoId: res.Item.cognitoId as string,
+    lastLoginAt: res.Item.lastLoginAt as string | undefined,
+  };
+}
+
+export async function getOrgUsers(orgId: string): Promise<User[]> {
+  const res = await db.send(
+    new QueryCommand({
+      TableName: TABLE_NAME,
+      KeyConditionExpression: "PK = :pk AND begins_with(SK, :prefix)",
+      ExpressionAttributeValues: {
+        ":pk": `ORG#${orgId}`,
+        ":prefix": "USER#",
+      },
+    })
+  );
+  return (res.Items ?? []).map((item) => ({
+    id: (item.SK as string).replace("USER#", ""),
+    orgId,
+    email: item.email as string,
+    role: item.role as "admin" | "user",
+    cognitoId: item.cognitoId as string,
+    lastLoginAt: item.lastLoginAt as string | undefined,
+  }));
+}
+
+// Adjust an org's balance by a signed delta (positive = credit, negative = debit).
+// Used for admin corrections — does not touch topUpsUsd or spentUsd counters.
+export async function adjustBalance(orgId: string, deltaUsd: number): Promise<void> {
+  if (deltaUsd === 0) return;
+  await db.send(
+    new UpdateCommand({
+      TableName: TABLE_NAME,
+      Key: { PK: `ORG#${orgId}`, SK: "BALANCE" },
+      UpdateExpression: "ADD balanceUsd :delta",
+      ExpressionAttributeValues: { ":delta": deltaUsd },
+    })
+  );
 }
 
 /** Return the invite if it exists and has not expired; null otherwise. */

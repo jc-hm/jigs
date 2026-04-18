@@ -98,6 +98,7 @@ Invite-based onboarding (copy inviter's templates on signup) is implemented — 
 
 ## Session & Auth
 
+- **Cognito token expiration tuning**: ID token default TTL is 1 hour, refresh token is 30 days. With the `loggedOutAt` DynamoDB revocation in place, force-logout takes effect immediately for API calls, but the 1h ID token window is still "live" from the client's perspective (it just fails on next use). Consider shortening the ID token TTL to 5–15 min in the Cognito User Pool client — the tradeoff is more frequent refreshes vs. smaller revocation window. Measure real-world refresh cadence first.
 - **Local dev multi-user testing**: Currently local mode hardcodes a single `test-user`. Add support for switching between test personas (e.g., `?user=admin`, `?user=freeuser`) to test role-based behavior without Cognito.
 - **Session timeout behavior**: sessions currently persist across a full day (and longer) with no forced re-auth. Cognito defaults are ID token 1h / refresh 30d, and `amazon-cognito-identity-js` silently refreshes the ID token on each call, so users only re-log in when the refresh token expires a month later. Decide whether that's acceptable (arguably fine for a single-user medical tool), add an explicit short-lived session mode (force re-auth after N hours of inactivity), or at least surface a "your session will expire in X" warning. Start by measuring the actual behavior — what is `getSession()` doing on page load after 24h?
 

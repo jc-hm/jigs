@@ -13,13 +13,14 @@ interface JigsStackProps extends cdk.StackProps {
   stage: string;
   bedrockModelSonnet: string;
   bedrockModelHaiku: string;
+  superAdminCognitoId: string;
 }
 
 export class JigsStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: JigsStackProps) {
     super(scope, id, props);
 
-    const { stage, bedrockModelSonnet, bedrockModelHaiku } = props;
+    const { stage, bedrockModelSonnet, bedrockModelHaiku, superAdminCognitoId } = props;
 
     // --- DynamoDB Table (single-table design) ---
     const table = new dynamodb.Table(this, "JigsTable", {
@@ -132,6 +133,7 @@ export class JigsStack extends cdk.Stack {
         COGNITO_CLIENT_ID: userPoolClient.userPoolClientId,
         BEDROCK_MODEL_SONNET: bedrockModelSonnet,
         BEDROCK_MODEL_HAIKU: bedrockModelHaiku,
+        SUPER_ADMIN_COGNITO_ID: superAdminCognitoId,
       },
     });
 
@@ -157,6 +159,13 @@ export class JigsStack extends cdk.Stack {
           "bedrock:InvokeModelWithResponseStream",
         ],
         resources: ["*"],
+      })
+    );
+
+    apiFunction.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ["cognito-idp:AdminUserGlobalSignOut"],
+        resources: [userPool.userPoolArn],
       })
     );
 

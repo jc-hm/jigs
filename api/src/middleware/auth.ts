@@ -7,6 +7,7 @@ export interface AuthUser {
   orgId: string;
   role: "admin" | "user";
   cognitoId?: string;
+  superAdmin?: boolean;
 }
 
 // Cached verifier instance (JWKS cached across warm Lambda invocations)
@@ -27,10 +28,15 @@ export async function authMiddleware(c: Context, next: Next) {
   // Local dev: skip auth only if STAGE is explicitly "local" AND no Cognito is configured.
   // If a pool ID exists, always enforce auth — prevents misconfigured deploys from skipping.
   if (config.isLocal && !config.cognitoUserPoolId) {
+    const localCognitoId = "local-admin-sub";
     c.set("user", {
       userId: "test-user",
       orgId: "test-org",
       role: "admin",
+      cognitoId: localCognitoId,
+      superAdmin: config.superAdminCognitoId
+        ? localCognitoId === config.superAdminCognitoId
+        : false,
     } satisfies AuthUser);
     return next();
   }
@@ -49,7 +55,7 @@ export async function authMiddleware(c: Context, next: Next) {
       | undefined;
 
     // Look up user from DynamoDB by Cognito sub
-    const { getUserByCognitoId, autoProvisionUser } = await import(
+    const { getUserByCognitoId, autoProvisionUser, updateLastLogin } = await import(
       "../db/entities.js"
     );
     let user = await getUserByCognitoId(cognitoId);
@@ -62,11 +68,23 @@ export async function authMiddleware(c: Context, next: Next) {
       user = await autoProvisionUser(cognitoId, email);
     }
 
+    // Reject tokens issued before a forced logout (loggedOutAt timestamp).
+    // payload.iat is seconds since epoch; loggedOutAt is an ISO string.
+    if (user.loggedOutAt && payload.iat * 1000 < new Date(user.loggedOutAt).getTime()) {
+      return c.json({ error: "Session has been revoked" }, 401);
+    }
+
+    // Track last login — fire-and-forget, never blocks the request
+    updateLastLogin(user.id, user.orgId).catch(() => {});
+
     c.set("user", {
       userId: user.id,
       orgId: user.orgId,
       role: user.role,
       cognitoId,
+      superAdmin: config.superAdminCognitoId
+        ? cognitoId === config.superAdminCognitoId
+        : false,
     } satisfies AuthUser);
     return next();
   } catch {

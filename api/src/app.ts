@@ -2,10 +2,12 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { authMiddleware } from "./middleware/auth.js";
+import { superAdminOnly } from "./middleware/super-admin.js";
 import { fill } from "./routes/fill.js";
 import { templates } from "./routes/templates.js";
 import { billing } from "./routes/billing.js";
 import { invites } from "./routes/invites.js";
+import { admin } from "./routes/admin.js";
 import { config } from "./env.js";
 import { log } from "./lib/log.js";
 import type { AppEnv } from "./types.js";
@@ -57,6 +59,10 @@ app.route("/api/v1/fill", fill);
 app.route("/api/v1/templates", templates);
 app.route("/api/v1/billing", billing);
 app.route("/api/v1/invites", invites);
+
+// Super admin routes — requires valid Cognito JWT + pinned cognitoId match
+app.use("/api/v1/admin/*", superAdminOnly);
+app.route("/api/v1/admin", admin);
 
 // --- Global error handler ---
 // Hono's default 500 handler swallows the stack — that's why our prior

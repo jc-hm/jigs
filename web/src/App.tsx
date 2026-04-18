@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Fill } from "./pages/Fill";
 import { Templates } from "./pages/Templates";
 import { Profile } from "./pages/Profile";
+import { Admin } from "./pages/Admin";
 import {
   loadAuthConfig,
   getIdToken,
@@ -171,6 +172,13 @@ function App() {
         inviteCode={signupParams.inviteCode ?? undefined}
       />
     );
+  }
+
+  // Path-based admin route — only reachable when authenticated.
+  // Unauthenticated users hit the login page above, preventing the
+  // 401 → signOut → reload → 401 loop.
+  if (window.location.pathname === "/admin") {
+    return <Admin />;
   }
 
   return (

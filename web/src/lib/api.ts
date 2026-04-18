@@ -1,4 +1,4 @@
-import { getIdToken } from "./auth";
+import { getIdToken, signOut } from "./auth";
 
 const API_BASE = "/api/v1";
 
@@ -26,13 +26,19 @@ async function authHeaders(): Promise<Record<string, string>> {
 
 export async function apiFetch<T>(
   path: string,
-  options?: RequestInit
+  options?: RequestInit & { baseUrl?: string }
 ): Promise<T> {
+  const { baseUrl = API_BASE, ...fetchOptions } = options ?? {};
   const headers = await authHeaders();
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetch(`${baseUrl}${path}`, {
     headers,
-    ...options,
+    ...fetchOptions,
   });
+  if (res.status === 401) {
+    await signOut();
+    window.location.reload();
+    throw new ApiError("Session expired", 401);
+  }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new ApiError(
@@ -69,6 +75,11 @@ export async function apiFetch<T>(
  * "events arriving but failing to decode".
  */
 async function* readSSE<T>(res: Response): AsyncGenerator<T> {
+  if (res.status === 401) {
+    await signOut();
+    window.location.reload();
+    return;
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `API error: ${res.status}`);
@@ -274,4 +285,63 @@ export async function* streamAgent(body: {
     body: JSON.stringify(body),
   });
   yield* readSSE<AgentEvent>(res);
+}
+
+// --- Admin ---
+
+const ADMIN_BASE = "/api/v1/admin";
+
+export interface AdminUser {
+  id: string;
+  email: string;
+  role: "admin" | "user";
+  lastLoginAt?: string;
+}
+
+export interface AdminOrg {
+  orgId: string;
+  name: string;
+  plan: string;
+  balance: {
+    balanceUsd: number;
+    topUpsUsd: number;
+    spentUsd: number;
+    reportsLifetime: number;
+  };
+  users: AdminUser[];
+}
+
+export interface AdminOverview {
+  orgs: AdminOrg[];
+  aggregate: {
+    orgCount: number;
+    totalBalanceUsd: number;
+    totalSpentUsd: number;
+  };
+}
+
+export async function adminGetOverview(): Promise<AdminOverview> {
+  return apiFetch<AdminOverview>(`${ADMIN_BASE}/overview`, { baseUrl: "" });
+}
+
+export async function adminTopup(
+  orgId: string,
+  amountUsd: number,
+  reason?: string,
+): Promise<{ orgId: string; amountUsd: number; newBalance: AdminOrg["balance"] }> {
+  return apiFetch(`${ADMIN_BASE}/orgs/${orgId}/topup`, {
+    baseUrl: "",
+    method: "POST",
+    body: JSON.stringify({ amountUsd, reason }),
+  });
+}
+
+export async function adminForceLogout(
+  orgId: string,
+  userId: string,
+): Promise<{ userId: string; loggedOut: boolean }> {
+  return apiFetch(`${ADMIN_BASE}/orgs/${orgId}/users/${userId}/logout`, {
+    baseUrl: "",
+    method: "POST",
+  });
 }
