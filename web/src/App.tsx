@@ -16,7 +16,7 @@ import {
 } from "./lib/auth";
 import { getInvite } from "./lib/api";
 import { LandingPage } from "./components/LandingPage";
-import { FeedbackForm } from "./components/FeedbackForm";
+import { ContactModal } from "./components/ContactModal";
 
 type Page = "fill" | "templates" | "profile";
 type AuthState = "loading" | "authenticated" | "unauthenticated" | "error";
@@ -40,23 +40,28 @@ function parseHash(): { page: Page; subpath: string } {
   return { page, subpath };
 }
 
-// Invite-only access model:
-//   ?invite=CODE  → show signup form; capture code for template bootstrapping
-//   ?signup=1     → show signup form directly (bypasses landing page)
-//   (nothing)     → show landing page with sign-in option
+// URL-based auth navigation (persistent, back-button-friendly):
+//   ?signin  → sign-in form     ?signup  → sign-up form
+//   ?invite=CODE → one-time invite link (stripped, stored in sessionStorage)
+//   (nothing) → public landing page
 
-function readAndStripUrlParams(): { inviteCode: string | null; showSignup: boolean } {
+type AuthView = { show: boolean; mode: "signin" | "signup" };
+
+function getAuthView(): AuthView {
+  const params = new URLSearchParams(window.location.search);
+  if (params.has("signup")) return { show: true, mode: "signup" };
+  if (params.has("signin")) return { show: true, mode: "signin" };
+  return { show: false, mode: "signin" };
+}
+
+function readAndStripInvite(): { inviteCode: string | null } {
   const params = new URLSearchParams(window.location.search);
   const inviteCode = params.get("invite");
-  const hasSignup = Boolean(inviteCode || params.get("signup") === "1");
-
-  if (inviteCode) sessionStorage.setItem("jigs:pendingInvite", inviteCode);
-
-  if (params.has("invite") || params.has("signup")) {
+  if (inviteCode) {
+    sessionStorage.setItem("jigs:pendingInvite", inviteCode);
     history.replaceState({}, "", window.location.pathname + window.location.hash);
   }
-
-  return { inviteCode, showSignup: hasSignup };
+  return { inviteCode };
 }
 
 function App() {
@@ -66,14 +71,12 @@ function App() {
   const [route, setRoute] = useState(parseHash);
   const { page } = route;
   const [inviteBanner, setInviteBanner] = useState<string | null>(null);
-  const [showAuth, setShowAuth] = useState(() =>
-    new URLSearchParams(window.location.search).has("signin"),
-  );
+  const [authView, setAuthView] = useState<AuthView>(getAuthView);
   const [contactOpen, setContactOpen] = useState(false);
 
   // Read URL params once on mount — must run before auth check so the invite
   // code lands in sessionStorage before the user flow proceeds.
-  const [signupParams] = useState(readAndStripUrlParams);
+  const [inviteParams] = useState(readAndStripInvite);
 
   // Check auth on mount
   useEffect(() => {
@@ -106,10 +109,9 @@ function App() {
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
 
-  // Sync showAuth with browser back/forward — ?signin in URL means auth screen
+  // Sync authView with browser back/forward (?signin / ?signup in URL)
   useEffect(() => {
-    const onPopState = () =>
-      setShowAuth(new URLSearchParams(window.location.search).has("signin"));
+    const onPopState = () => setAuthView(getAuthView());
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
@@ -127,9 +129,14 @@ function App() {
     [route.page]
   );
 
-  const handleGoToAuth = useCallback(() => {
+  const handleGoToSignIn = useCallback(() => {
     history.pushState({}, "", "?signin");
-    setShowAuth(true);
+    setAuthView({ show: true, mode: "signin" });
+  }, []);
+
+  const handleGoToSignUp = useCallback(() => {
+    history.pushState({}, "", "?signup");
+    setAuthView({ show: true, mode: "signup" });
   }, []);
 
   const handleSignedIn = useCallback(async () => {
@@ -185,14 +192,15 @@ function App() {
   }
 
   if (authState === "unauthenticated") {
-    if (!signupParams.showSignup && !showAuth) {
-      return <LandingPage onSignIn={handleGoToAuth} />;
+    const hasInvite = Boolean(inviteParams.inviteCode);
+    if (!hasInvite && !authView.show) {
+      return <LandingPage onSignIn={handleGoToSignIn} onSignUp={handleGoToSignUp} />;
     }
     return (
       <AuthScreen
         onSignedIn={handleSignedIn}
-        initialMode={signupParams.showSignup ? "signup" : "signin"}
-        inviteCode={signupParams.inviteCode ?? undefined}
+        initialMode={hasInvite || authView.mode === "signup" ? "signup" : "signin"}
+        inviteCode={inviteParams.inviteCode ?? undefined}
       />
     );
   }
@@ -226,12 +234,25 @@ function App() {
         />
         <div className="flex-1" />
         <button
+          onClick={() => setContactOpen(true)}
+          className="px-3 py-1.5 rounded-md text-sm text-gray-500 hover:bg-gray-100 transition-colors"
+        >
+          Contact
+        </button>
+        <button
           onClick={handleSignOut}
           className="px-3 py-1.5 rounded-md text-sm text-gray-500 hover:bg-gray-100 transition-colors"
         >
           {t("nav.signOut")}
         </button>
       </header>
+      {contactOpen && (
+        <ContactModal
+          mode="authenticated"
+          page={page}
+          onClose={() => setContactOpen(false)}
+        />
+      )}
 
       {/* Invite bootstrap banner */}
       {inviteBanner && (
@@ -255,27 +276,6 @@ function App() {
         )}
         {page === "profile" && <Profile />}
       </main>
-
-      {/* Footer */}
-      <footer className="shrink-0 border-t border-gray-100 bg-white px-4 py-2">
-        <div className="flex items-center">
-          <button
-            onClick={() => setContactOpen((v) => !v)}
-            className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
-          >
-            {contactOpen ? "Close" : "Contact"}
-          </button>
-        </div>
-        {contactOpen && (
-          <div className="py-3 max-w-sm">
-            <FeedbackForm
-              mode="authenticated"
-              page={page}
-              onClose={() => setContactOpen(false)}
-            />
-          </div>
-        )}
-      </footer>
     </div>
   );
 }

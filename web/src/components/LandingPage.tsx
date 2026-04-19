@@ -1,9 +1,10 @@
-import { useState, useEffect, useRef, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { submitWaitlist } from "../lib/api";
-import { FeedbackForm } from "./FeedbackForm";
+import { ContactModal } from "./ContactModal";
 
 interface LandingPageProps {
   onSignIn: () => void;
+  onSignUp: () => void;
 }
 
 function MicIcon() {
@@ -36,23 +37,13 @@ function ClipboardIcon() {
   );
 }
 
-export function LandingPage({ onSignIn }: LandingPageProps) {
+export function LandingPage({ onSignIn, onSignUp }: LandingPageProps) {
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteLoading, setInviteLoading] = useState(false);
   const [inviteDone, setInviteDone] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [contactOpen, setContactOpen] = useState(false);
-  const contactRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (contactOpen) {
-      setTimeout(
-        () => contactRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
-        50,
-      );
-    }
-  }, [contactOpen]);
 
   const handleInviteSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -76,12 +67,20 @@ export function LandingPage({ onSignIn }: LandingPageProps) {
           <span className="text-sm font-semibold text-gray-800 tracking-tight">
             Template filling, simplified.
           </span>
-          <button
-            onClick={onSignIn}
-            className="px-4 py-1.5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            Sign in
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setContactOpen(true)}
+              className="text-sm text-gray-400 hover:text-gray-600 transition-colors"
+            >
+              Contact
+            </button>
+            <button
+              onClick={onSignIn}
+              className="px-4 py-1.5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              Sign in
+            </button>
+          </div>
         </div>
       </header>
 
@@ -105,10 +104,10 @@ export function LandingPage({ onSignIn }: LandingPageProps) {
                 Request an invite
               </button>
               <button
-                onClick={onSignIn}
+                onClick={onSignUp}
                 className="text-sm text-gray-500 hover:text-gray-800 transition-colors"
               >
-                Sign in →
+                Sign up →
               </button>
             </div>
           )}
@@ -221,27 +220,9 @@ export function LandingPage({ onSignIn }: LandingPageProps) {
         </div>
       </section>
 
-      {/* Footer */}
-      <footer className="border-t border-gray-100 px-6 py-6">
-        <div className="max-w-2xl mx-auto">
-          <button
-            onClick={() => setContactOpen((v) => !v)}
-            className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
-          >
-            {contactOpen ? "Close" : "Contact"}
-          </button>
-
-          {contactOpen && (
-            <div ref={contactRef} className="mt-4 max-w-sm">
-              <FeedbackForm
-                mode="public"
-                page="landing"
-                onClose={() => setContactOpen(false)}
-              />
-            </div>
-          )}
-        </div>
-      </footer>
+      {contactOpen && (
+        <ContactModal mode="public" page="landing" onClose={() => setContactOpen(false)} />
+      )}
     </div>
   );
 }
