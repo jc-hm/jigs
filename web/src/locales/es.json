@@ -4,7 +4,7 @@
   "app.errorBody": "No se pudo conectar al servidor. Por favor, inténtelo más tarde.",
   "app.retry": "Reintentar",
 
-  "nav.fillReport": "Completar informe",
+  "nav.fillReport": "Rellenar",
   "nav.templates": "Plantillas",
   "nav.profile": "Perfil",
   "nav.signOut": "Cerrar sesión",
@@ -44,7 +44,7 @@
 
   "tmpl.agentTitle": "Agente de IA",
   "tmpl.agentEmptyHeading": "Pide a la IA que gestione tus plantillas",
-  "tmpl.agentEmptyExamples": "\"Crear una plantilla de RM cerebral\", \"Mover todas las plantillas de neuro a una carpeta neuro/\", \"Agregar sección de impresiones a ct-tórax\"",
+  "tmpl.agentEmptyExamples": "\"Crear una plantilla de estado semanal\", \"Mover todas las plantillas de proyectos a una carpeta proyectos/\", \"Agregar una sección de resumen a propuesta\"",
   "tmpl.youLabel": "Tú",
   "tmpl.agentLabel": "Agente",
   "tmpl.working": "Trabajando...",
@@ -93,7 +93,7 @@
   "profile.loadingUsage": "Cargando uso…",
   "profile.balance": "Saldo",
   "profile.remainingCredit": "crédito restante",
-  "profile.totalReports": "Informes totales",
+  "profile.totalReports": "Plantillas rellenadas",
   "profile.lifetime": "total histórico",
   "profile.inviteTitle": "Invitar a un amigo",
   "profile.shareTemplates": "Compartir mis plantillas con los invitados",

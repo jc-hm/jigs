@@ -4,7 +4,7 @@
   "app.errorBody": "Could not connect to the server. Please try again later.",
   "app.retry": "Retry",
 
-  "nav.fillReport": "Fill Report",
+  "nav.fillReport": "Fill",
   "nav.templates": "Templates",
   "nav.profile": "Profile",
   "nav.signOut": "Sign out",
@@ -44,7 +44,7 @@
 
   "tmpl.agentTitle": "AI Agent",
   "tmpl.agentEmptyHeading": "Ask the AI to manage your templates",
-  "tmpl.agentEmptyExamples": "\"Create a brain MRI template\", \"Move all neuro templates to a neuro/ folder\", \"Add an impressions section to ct-chest\"",
+  "tmpl.agentEmptyExamples": "\"Create a weekly status template\", \"Move all project templates to a projects/ folder\", \"Add a summary section to proposal\"",
   "tmpl.youLabel": "You",
   "tmpl.agentLabel": "Agent",
   "tmpl.working": "Working...",
@@ -93,7 +93,7 @@
   "profile.loadingUsage": "Loading usage…",
   "profile.balance": "Balance",
   "profile.remainingCredit": "remaining credit",
-  "profile.totalReports": "Total Reports",
+  "profile.totalReports": "Templates Filled",
   "profile.lifetime": "lifetime",
   "profile.inviteTitle": "Invite a friend",
   "profile.shareTemplates": "Share my templates with invited users",
