@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useState, useEffect, useRef, type FormEvent } from "react";
 import { submitWaitlist } from "../lib/api";
 import { FeedbackForm } from "./FeedbackForm";
 
@@ -36,33 +36,36 @@ function ClipboardIcon() {
   );
 }
 
-type FooterPanel = "contact" | null;
-
 export function LandingPage({ onSignIn }: LandingPageProps) {
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteNote, setInviteNote] = useState("");
   const [inviteLoading, setInviteLoading] = useState(false);
   const [inviteDone, setInviteDone] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
-  const [footerPanel, setFooterPanel] = useState<FooterPanel>(null);
+  const [contactOpen, setContactOpen] = useState(false);
+  const contactRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (contactOpen) {
+      setTimeout(
+        () => contactRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
+        50,
+      );
+    }
+  }, [contactOpen]);
 
   const handleInviteSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setInviteLoading(true);
     setInviteError(null);
     try {
-      await submitWaitlist(inviteEmail, inviteNote || undefined);
+      await submitWaitlist(inviteEmail);
       setInviteDone(true);
     } catch (err) {
       setInviteError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
       setInviteLoading(false);
     }
-  };
-
-  const toggleFooter = (panel: FooterPanel) => {
-    setFooterPanel((prev) => (prev === panel ? null : panel));
   };
 
   return (
@@ -84,10 +87,6 @@ export function LandingPage({ onSignIn }: LandingPageProps) {
 
       {/* Hero */}
       <section className="flex-1 flex flex-col items-center justify-center text-center px-6 pt-28 pb-20">
-        <span className="inline-block mb-6 px-3 py-1 text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200 rounded-full">
-          Private beta · Invite only
-        </span>
-
         <h1 className="text-4xl sm:text-5xl font-bold text-gray-900 tracking-tight max-w-xl leading-tight">
           Fill templates by talking.
         </h1>
@@ -123,13 +122,6 @@ export function LandingPage({ onSignIn }: LandingPageProps) {
                 autoFocus
                 value={inviteEmail}
                 onChange={(e) => setInviteEmail(e.target.value)}
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              <input
-                type="text"
-                placeholder="Tell us about your use case (optional)"
-                value={inviteNote}
-                onChange={(e) => setInviteNote(e.target.value)}
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
               {inviteError && (
@@ -232,32 +224,19 @@ export function LandingPage({ onSignIn }: LandingPageProps) {
       {/* Footer */}
       <footer className="border-t border-gray-100 px-6 py-6">
         <div className="max-w-2xl mx-auto">
-          <div className="flex items-center gap-4 text-xs text-gray-400">
-            <a
-              href="#privacy"
-              onClick={(e) => {
-                e.preventDefault();
-                document.getElementById("privacy")?.scrollIntoView({ behavior: "smooth" });
-              }}
-              className="hover:text-gray-600 transition-colors"
-            >
-              Privacy
-            </a>
-            <span>·</span>
-            <button
-              onClick={() => toggleFooter("contact")}
-              className="hover:text-gray-600 transition-colors"
-            >
-              {footerPanel === "contact" ? "Close" : "Contact"}
-            </button>
-          </div>
+          <button
+            onClick={() => setContactOpen((v) => !v)}
+            className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            {contactOpen ? "Close" : "Contact"}
+          </button>
 
-          {footerPanel === "contact" && (
-            <div className="mt-4 max-w-sm">
+          {contactOpen && (
+            <div ref={contactRef} className="mt-4 max-w-sm">
               <FeedbackForm
                 mode="public"
                 page="landing"
-                onClose={() => setFooterPanel(null)}
+                onClose={() => setContactOpen(false)}
               />
             </div>
           )}

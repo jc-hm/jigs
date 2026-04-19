@@ -66,7 +66,9 @@ function App() {
   const [route, setRoute] = useState(parseHash);
   const { page } = route;
   const [inviteBanner, setInviteBanner] = useState<string | null>(null);
-  const [landingView, setLandingView] = useState<"landing" | "auth">("landing");
+  const [showAuth, setShowAuth] = useState(() =>
+    new URLSearchParams(window.location.search).has("signin"),
+  );
   const [contactOpen, setContactOpen] = useState(false);
 
   // Read URL params once on mount — must run before auth check so the invite
@@ -104,6 +106,14 @@ function App() {
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
 
+  // Sync showAuth with browser back/forward — ?signin in URL means auth screen
+  useEffect(() => {
+    const onPopState = () =>
+      setShowAuth(new URLSearchParams(window.location.search).has("signin"));
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
   // Clicking a top-nav item while already on that page is a no-op so
   // it doesn't clobber any `#templates/foo.md` sub-path the user has
   // accumulated by opening a file — the intuition is "clicking
@@ -117,7 +127,14 @@ function App() {
     [route.page]
   );
 
+  const handleGoToAuth = useCallback(() => {
+    history.pushState({}, "", "?signin");
+    setShowAuth(true);
+  }, []);
+
   const handleSignedIn = useCallback(async () => {
+    // Clean ?signin from URL after successful auth
+    history.replaceState({}, "", window.location.pathname + window.location.hash);
     setAuthState("authenticated");
     // Check for a pending invite and show a banner if it's valid.
     const code = sessionStorage.getItem("jigs:pendingInvite");
@@ -168,8 +185,8 @@ function App() {
   }
 
   if (authState === "unauthenticated") {
-    if (!signupParams.showSignup && landingView === "landing") {
-      return <LandingPage onSignIn={() => setLandingView("auth")} />;
+    if (!signupParams.showSignup && !showAuth) {
+      return <LandingPage onSignIn={handleGoToAuth} />;
     }
     return (
       <AuthScreen

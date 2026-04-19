@@ -8,7 +8,6 @@ interface FeedbackFormProps {
 }
 
 export function FeedbackForm({ mode, page, onClose }: FeedbackFormProps) {
-  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [content, setContent] = useState("");
   const [loading, setLoading] = useState(false);
@@ -24,7 +23,6 @@ export function FeedbackForm({ mode, page, onClose }: FeedbackFormProps) {
         await submitFeedback({
           content,
           senderEmail: email,
-          ...(name.trim() && { senderName: name.trim() }),
           ...(page && { context: { page } }),
         });
       } else {
@@ -60,23 +58,14 @@ export function FeedbackForm({ mode, page, onClose }: FeedbackFormProps) {
   return (
     <form onSubmit={handleSubmit} className="space-y-3">
       {mode === "public" && (
-        <>
-          <input
-            type="text"
-            placeholder="Name (optional)"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-          <input
-            type="email"
-            placeholder="Email"
-            required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-        </>
+        <input
+          type="email"
+          placeholder="Email"
+          required
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
       )}
       <textarea
         placeholder="Your message…"
