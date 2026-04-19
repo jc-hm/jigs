@@ -9,7 +9,7 @@ billing.get("/usage", async (c) => {
   const user = c.get("user");
 
   const balance = await getOrgBalance(user.orgId);
-  return c.json({ balance });
+  return c.json({ balance, email: user.email ?? null });
 });
 
 // Get org-wide usage (admin only)

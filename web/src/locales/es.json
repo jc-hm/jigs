@@ -159,5 +159,7 @@
   "profile.newPassword": "Nueva contraseña (mín. 8 caracteres, 1 dígito)",
   "profile.changingPassword": "Cambiando…",
   "profile.changePasswordSubmit": "Cambiar contraseña",
+  "profile.confirmPassword": "Confirmar nueva contraseña",
+  "profile.passwordMismatch": "Las contraseñas no coinciden.",
   "profile.passwordChanged": "Contraseña cambiada."
 }

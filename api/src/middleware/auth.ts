@@ -8,6 +8,7 @@ export interface AuthUser {
   role: "admin" | "user";
   cognitoId?: string;
   superAdmin?: boolean;
+  email?: string;
 }
 
 // Cached verifier instance (JWKS cached across warm Lambda invocations)
@@ -85,6 +86,7 @@ export async function authMiddleware(c: Context, next: Next) {
       superAdmin: config.superAdminCognitoId
         ? cognitoId === config.superAdminCognitoId
         : false,
+      email: email ?? undefined,
     } satisfies AuthUser);
     return next();
   } catch {
