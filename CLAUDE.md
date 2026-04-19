@@ -4,6 +4,15 @@ AI-powered template filling SaaS. First vertical: radiology reports.
 
 > **Product context:** Read `docs/PRODUCT.md` for the product vision, user types, workflows, business model, and guiding principles. Consult it before making product-level decisions or when you need to understand the *why* behind a feature. `docs/BACKLOG.md` has captured future ideas. `docs/signup-flow.md` documents the full auth + invite onboarding flow.
 
+## Messaging & Domain Neutrality
+
+**Do not use radiology, healthcare, or any domain-specific language in UI copy, placeholder text, hints, or examples.** The product is generic template filling — radiology is the first internal vertical but the product voice is domain-neutral. Any example, hint, or label visible to users must work for any type of template (legal, HR, project management, sales, etc.).
+
+- ❌ "Describe a study", "generate a report", "left knee MRI", "ACL tear"
+- ✅ "Describe what goes in the template", "monthly status update, shipped login flow, blocked on API rate limits"
+
+This applies to both English and Spanish locale strings. When adding or updating UI copy, pick a generic example that could plausibly appear in any industry.
+
 ## Architecture
 
 - **AWS-native serverless** — Lambda (Function URLs, streaming), DynamoDB, S3, Cognito, Bedrock, CloudFront
