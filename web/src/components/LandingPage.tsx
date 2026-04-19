@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { submitWaitlist } from "../lib/api";
 import { ContactModal } from "./ContactModal";
 
@@ -38,6 +39,7 @@ function ClipboardIcon() {
 }
 
 export function LandingPage({ onSignIn, onSignUp }: LandingPageProps) {
+  const { t } = useTranslation();
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteLoading, setInviteLoading] = useState(false);
@@ -65,20 +67,20 @@ export function LandingPage({ onSignIn, onSignUp }: LandingPageProps) {
       <header className="fixed top-0 inset-x-0 z-10 bg-white/90 backdrop-blur-sm border-b border-gray-100">
         <div className="max-w-4xl mx-auto px-6 h-14 flex items-center justify-between">
           <span className="text-sm font-semibold text-gray-800 tracking-tight">
-            Template filling, simplified.
+            {t("landing.tagline")}
           </span>
           <div className="flex items-center gap-3">
             <button
               onClick={() => setContactOpen(true)}
               className="text-sm text-gray-400 hover:text-gray-600 transition-colors"
             >
-              Contact
+              {t("landing.contact")}
             </button>
             <button
               onClick={onSignIn}
               className="px-4 py-1.5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
             >
-              Sign in
+              {t("landing.signIn")}
             </button>
           </div>
         </div>
@@ -87,11 +89,11 @@ export function LandingPage({ onSignIn, onSignUp }: LandingPageProps) {
       {/* Hero */}
       <section className="flex-1 flex flex-col items-center justify-center text-center px-6 pt-28 pb-20">
         <h1 className="text-4xl sm:text-5xl font-bold text-gray-900 tracking-tight max-w-xl leading-tight">
-          Fill templates by talking.
+          {t("landing.headline")}
         </h1>
 
         <p className="mt-4 text-lg text-gray-500 max-w-md">
-          Describe what goes in the template. Get it filled in seconds.
+          {t("landing.subhead")}
         </p>
 
         <div className="mt-8 flex flex-col items-center gap-3 w-full max-w-sm">
@@ -101,13 +103,13 @@ export function LandingPage({ onSignIn, onSignUp }: LandingPageProps) {
                 onClick={() => setInviteOpen(true)}
                 className="px-5 py-2.5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
               >
-                Request an invite
+                {t("landing.requestInvite")}
               </button>
               <button
                 onClick={onSignUp}
                 className="text-sm text-gray-500 hover:text-gray-800 transition-colors"
               >
-                Sign up →
+                {t("landing.signUp")}
               </button>
             </div>
           )}
@@ -116,7 +118,7 @@ export function LandingPage({ onSignIn, onSignUp }: LandingPageProps) {
             <form onSubmit={handleInviteSubmit} className="w-full space-y-2">
               <input
                 type="email"
-                placeholder="your@email.com"
+                placeholder={t("landing.emailPlaceholder")}
                 required
                 autoFocus
                 value={inviteEmail}
@@ -132,14 +134,14 @@ export function LandingPage({ onSignIn, onSignUp }: LandingPageProps) {
                   disabled={inviteLoading}
                   className="flex-1 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
                 >
-                  {inviteLoading ? "Sending…" : "Request invite"}
+                  {inviteLoading ? t("landing.sending") : t("landing.requestInviteSubmit")}
                 </button>
                 <button
                   type="button"
                   onClick={() => setInviteOpen(false)}
                   className="px-4 py-2 text-sm text-gray-400 hover:text-gray-600 transition-colors"
                 >
-                  Cancel
+                  {t("landing.cancel")}
                 </button>
               </div>
             </form>
@@ -147,7 +149,7 @@ export function LandingPage({ onSignIn, onSignUp }: LandingPageProps) {
 
           {inviteDone && (
             <p className="text-sm text-gray-600">
-              You're on the list. We'll be in touch.
+              {t("landing.inviteSent")}
             </p>
           )}
         </div>
@@ -157,24 +159,24 @@ export function LandingPage({ onSignIn, onSignUp }: LandingPageProps) {
       <section className="bg-gray-50 px-6 py-16">
         <div className="max-w-3xl mx-auto">
           <h2 className="text-xs font-semibold uppercase tracking-widest text-gray-400 text-center mb-10">
-            How it works
+            {t("landing.howItWorksTitle")}
           </h2>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-8">
             {[
               {
                 icon: <MicIcon />,
-                title: "Describe",
-                body: "Say what goes in the template — in your own words, as fast as you can speak.",
+                title: t("landing.step1Title"),
+                body: t("landing.step1Body"),
               },
               {
                 icon: <SparkleIcon />,
-                title: "Fills itself",
-                body: "The template is filled in seconds. No formatting, no copy-paste.",
+                title: t("landing.step2Title"),
+                body: t("landing.step2Body"),
               },
               {
                 icon: <ClipboardIcon />,
-                title: "Copy",
-                body: "One click copies the filled result. You're done.",
+                title: t("landing.step3Title"),
+                body: t("landing.step3Body"),
               },
             ].map((step) => (
               <div key={step.title} className="flex flex-col items-center text-center gap-3">
@@ -191,31 +193,23 @@ export function LandingPage({ onSignIn, onSignUp }: LandingPageProps) {
       <section id="privacy" className="px-6 py-14">
         <div className="max-w-2xl mx-auto">
           <h2 className="text-xs font-semibold uppercase tracking-widest text-gray-400 mb-6">
-            Your data, simply.
+            {t("landing.privacyTitle")}
           </h2>
           <div className="space-y-3 text-sm text-gray-500 leading-relaxed">
+            <p>{t("landing.privacyP1")}</p>
             <p>
-              We store your email address and usage counts to manage your account.
-              Your templates — the files you create — are stored securely on AWS infrastructure.
-            </p>
-            <p>
-              When you fill a template, your description and the template are sent to
-              AWS's AI service to generate the result. That content is not retained after
-              the request completes, and AWS does not use it to train AI models.{" "}
+              {t("landing.privacyP2Before")}{" "}
               <a
                 href="https://aws.amazon.com/bedrock/security-privacy-responsible-ai/"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-blue-500 hover:underline"
               >
-                AWS Bedrock privacy ↗
+                {t("landing.privacyLinkText")}
               </a>
             </p>
-            <p>
-              Your activity history is saved in your own browser's local storage for
-              your convenience — not on our servers.
-            </p>
-            <p>No tracking cookies. No analytics.</p>
+            <p>{t("landing.privacyP3")}</p>
+            <p>{t("landing.privacyP4")}</p>
           </div>
         </div>
       </section>

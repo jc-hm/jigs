@@ -72,8 +72,13 @@ export class JigsStack extends cdk.Stack {
           ? cdk.RemovalPolicy.RETAIN
           : cdk.RemovalPolicy.DESTROY,
       autoDeleteObjects: stage !== "prod",
-      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
-      encryption: s3.BucketEncryption.S3_MANAGED,
+      // Public read required for S3StaticWebsiteOrigin (website endpoint).
+      // Website hosting returns 404 for missing objects (vs 403 with OAI), so
+      // the CloudFront error response only needs to handle 404 — API 403s pass
+      // through cleanly instead of being replaced with index.html.
+      publicReadAccess: true,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ACLS,
+      websiteIndexDocument: "index.html",
     });
 
     // --- Cognito User Pool ---
@@ -225,14 +230,9 @@ export class JigsStack extends cdk.Stack {
     });
 
     // --- CloudFront Distribution ---
-    const oai = new cloudfront.OriginAccessIdentity(this, "WebOAI");
-    webBucket.grantRead(oai);
-
     const distribution = new cloudfront.Distribution(this, "Distribution", {
       defaultBehavior: {
-        origin: new origins.S3Origin(webBucket, {
-          originAccessIdentity: oai,
-        }),
+        origin: new origins.S3StaticWebsiteOrigin(webBucket),
         viewerProtocolPolicy:
           cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
       },
@@ -253,11 +253,6 @@ export class JigsStack extends cdk.Stack {
       errorResponses: [
         {
           httpStatus: 404,
-          responseHttpStatus: 200,
-          responsePagePath: "/index.html",
-        },
-        {
-          httpStatus: 403,
           responseHttpStatus: 200,
           responsePagePath: "/index.html",
         },

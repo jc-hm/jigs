@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { submitFeedback, submitAuthFeedback } from "../lib/api";
 
 interface FeedbackFormProps {
@@ -8,6 +9,7 @@ interface FeedbackFormProps {
 }
 
 export function FeedbackForm({ mode, page, onClose }: FeedbackFormProps) {
+  const { t } = useTranslation();
   const [email, setEmail] = useState("");
   const [content, setContent] = useState("");
   const [loading, setLoading] = useState(false);
@@ -42,13 +44,13 @@ export function FeedbackForm({ mode, page, onClose }: FeedbackFormProps) {
   if (done) {
     return (
       <div className="text-center py-4">
-        <p className="text-sm text-gray-700 font-medium">Message sent. Thanks!</p>
+        <p className="text-sm text-gray-700 font-medium">{t("feedback.sent")}</p>
         {onClose && (
           <button
             onClick={onClose}
             className="mt-3 text-xs text-gray-400 hover:text-gray-600 transition-colors"
           >
-            Close
+            {t("feedback.close")}
           </button>
         )}
       </div>
@@ -60,7 +62,7 @@ export function FeedbackForm({ mode, page, onClose }: FeedbackFormProps) {
       {mode === "public" && (
         <input
           type="email"
-          placeholder="Email"
+          placeholder={t("feedback.emailPlaceholder")}
           required
           value={email}
           onChange={(e) => setEmail(e.target.value)}
@@ -68,7 +70,7 @@ export function FeedbackForm({ mode, page, onClose }: FeedbackFormProps) {
         />
       )}
       <textarea
-        placeholder="Your message…"
+        placeholder={t("feedback.messagePlaceholder")}
         required
         rows={4}
         value={content}
@@ -82,7 +84,7 @@ export function FeedbackForm({ mode, page, onClose }: FeedbackFormProps) {
           disabled={loading}
           className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
         >
-          {loading ? "Sending…" : "Send"}
+          {loading ? t("feedback.sending") : t("feedback.send")}
         </button>
         {onClose && (
           <button
@@ -90,7 +92,7 @@ export function FeedbackForm({ mode, page, onClose }: FeedbackFormProps) {
             onClick={onClose}
             className="text-sm text-gray-400 hover:text-gray-600 transition-colors"
           >
-            Cancel
+            {t("feedback.cancel")}
           </button>
         )}
       </div>

@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { apiFetch, ApiError, createInvite } from "../lib/api";
+import { getCurrentUserEmail, changePassword } from "../lib/auth";
 
 interface Usage {
   balance: {
@@ -11,22 +12,13 @@ interface Usage {
   };
 }
 
-// How many times to retry the usage fetch before surfacing an error.
-// 3 attempts with 1s spacing covers the typical Lambda cold-start + a
-// single DynamoDB throttle window without making the user wait forever
-// on a truly-broken endpoint.
 const MAX_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 1000;
 
 function isTransient(err: unknown): boolean {
-  // Retry on Dynamo-throttled billing reads (429) and anything 5xx —
-  // those usually clear within a second or two. Anything else (400
-  // validation, 401 unauthenticated, 404 org-not-found) is terminal.
   if (err instanceof ApiError) {
     return err.status === 429 || (err.status >= 500 && err.status < 600);
   }
-  // Network errors (TypeError from fetch) are also worth retrying —
-  // they're almost always transient connectivity blips.
   return err instanceof TypeError;
 }
 
@@ -37,8 +29,6 @@ export function Profile() {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // Guard against setState-after-unmount if the user navigates away
-    // while a retry is still pending (Profile → Fill within ~3s).
     let cancelled = false;
 
     const fetchWithRetry = async () => {
@@ -59,9 +49,6 @@ export function Profile() {
             setIsLoading(false);
             return;
           }
-          // Wait before the next attempt. Flat 1s spacing is fine here
-          // — usage is a single-row read, so if it's throttled the
-          // contention clears on the order of a second.
           await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
         }
       }
@@ -76,6 +63,8 @@ export function Profile() {
   return (
     <div className="p-6 max-w-4xl mx-auto">
       <h1 className="text-2xl font-semibold text-gray-800 mb-6">{t("profile.title")}</h1>
+
+      <AccountSection />
 
       {isLoading && (
         <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg text-gray-500 text-sm mb-4">
@@ -110,6 +99,103 @@ export function Profile() {
 
       <InviteSection />
     </div>
+  );
+}
+
+function AccountSection() {
+  const { t } = useTranslation();
+  const email = getCurrentUserEmail();
+  const [showChangePassword, setShowChangePassword] = useState(false);
+
+  return (
+    <div className="mb-6 bg-white border border-gray-200 rounded-lg p-4">
+      <h2 className="text-sm font-medium text-gray-700 mb-3">{t("profile.account")}</h2>
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="text-xs text-gray-400 mb-0.5">{t("profile.email")}</div>
+          <div className="text-sm text-gray-700">{email ?? "—"}</div>
+        </div>
+        <button
+          onClick={() => setShowChangePassword((v) => !v)}
+          className="text-xs text-blue-600 hover:text-blue-700 transition-colors"
+        >
+          {t("profile.changePasswordTitle")}
+        </button>
+      </div>
+      {showChangePassword && (
+        <div className="mt-4 border-t border-gray-100 pt-4">
+          <ChangePasswordForm onDone={() => setShowChangePassword(false)} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ChangePasswordForm({ onDone }: { onDone: () => void }) {
+  const { t } = useTranslation();
+  const [oldPassword, setOldPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+    try {
+      await changePassword(oldPassword, newPassword);
+      setDone(true);
+      setTimeout(onDone, 1500);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (done) {
+    return (
+      <p className="text-sm text-green-600">{t("profile.passwordChanged")}</p>
+    );
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-2">
+      <input
+        type="password"
+        placeholder={t("profile.currentPassword")}
+        required
+        value={oldPassword}
+        onChange={(e) => setOldPassword(e.target.value)}
+        className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+      />
+      <input
+        type="password"
+        placeholder={t("profile.newPassword")}
+        required
+        value={newPassword}
+        onChange={(e) => setNewPassword(e.target.value)}
+        className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+      />
+      {error && <p className="text-xs text-red-600">{error}</p>}
+      <div className="flex gap-2">
+        <button
+          type="submit"
+          disabled={loading}
+          className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+        >
+          {loading ? t("profile.changingPassword") : t("profile.changePasswordSubmit")}
+        </button>
+        <button
+          type="button"
+          onClick={onDone}
+          className="px-4 py-2 text-sm text-gray-400 hover:text-gray-600 transition-colors"
+        >
+          {t("feedback.cancel")}
+        </button>
+      </div>
+    </form>
   );
 }
 

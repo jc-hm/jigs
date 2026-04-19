@@ -5,8 +5,8 @@
   "scripts": {
     "build": "tsc",
     "synth": "cdk synth",
-    "deploy:staging": "cdk deploy --context stage=staging",
-    "deploy:prod": "cdk deploy --context stage=prod",
+    "deploy:staging": "cdk deploy --context stage=staging --require-approval never",
+    "deploy:prod": "cdk deploy --context stage=prod --require-approval never",
     "diff:staging": "cdk diff --context stage=staging",
     "diff:prod": "cdk diff --context stage=prod",
     "typecheck": "tsc --noEmit"

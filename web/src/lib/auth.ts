@@ -221,6 +221,45 @@ export function getCurrentUserId(): string {
 }
 
 // ---------------------------------------------------------------------------
+// Current user email (decoded from cached token — synchronous)
+// ---------------------------------------------------------------------------
+
+export function getCurrentUserEmail(): string | null {
+  const userPool = getUserPool();
+  if (!userPool) return null;
+  const user = userPool.getCurrentUser();
+  if (!user) return null;
+  const token = user.getSignInUserSession()?.getIdToken().getJwtToken();
+  if (!token) return null;
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1]));
+    return payload.email ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Change password
+// ---------------------------------------------------------------------------
+
+export function changePassword(oldPassword: string, newPassword: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const userPool = getUserPool();
+    if (!userPool) return reject(new Error("Auth not configured"));
+    const user = userPool.getCurrentUser();
+    if (!user) return reject(new Error("Not signed in"));
+    user.getSession((err: Error | null, session: CognitoUserSession | null) => {
+      if (err || !session?.isValid()) return reject(new Error("Session invalid"));
+      user.changePassword(oldPassword, newPassword, (changeErr) => {
+        if (changeErr) return reject(changeErr);
+        resolve();
+      });
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Sign out
 // ---------------------------------------------------------------------------
 

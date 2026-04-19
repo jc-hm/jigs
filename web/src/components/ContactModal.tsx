@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { FeedbackForm } from "./FeedbackForm";
 
 export function ContactModal({
@@ -9,6 +10,7 @@ export function ContactModal({
   page?: string;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/20"
@@ -19,7 +21,7 @@ export function ContactModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-4">
-          <p className="text-sm font-semibold text-gray-800">Contact</p>
+          <p className="text-sm font-semibold text-gray-800">{t("contact.title")}</p>
           <button
             onClick={onClose}
             className="text-xl leading-none text-gray-400 hover:text-gray-600 transition-colors"
