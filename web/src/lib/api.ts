@@ -345,3 +345,89 @@ export async function adminForceLogout(
     method: "POST",
   });
 }
+
+export interface AdminWaitlistEntry {
+  email: string;
+  createdAt: string;
+  note?: string;
+}
+
+export async function adminGetWaitlist(): Promise<{ entries: AdminWaitlistEntry[] }> {
+  return apiFetch(`${ADMIN_BASE}/waitlist`, { baseUrl: "" });
+}
+
+export type FeedbackType = "contact" | "reaction" | "bug";
+
+export interface AdminFeedbackItem {
+  id: string;
+  type: FeedbackType;
+  createdAt: string;
+  content?: string;
+  rating?: "up" | "down";
+  context?: { page?: string; requestId?: string; action?: string };
+  userId?: string;
+  orgId?: string;
+  senderEmail?: string;
+  senderName?: string;
+  read?: boolean;
+}
+
+export async function adminGetFeedback(
+  limit = 20,
+  cursor?: string,
+): Promise<{ items: AdminFeedbackItem[]; nextCursor?: string }> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (cursor) params.set("cursor", cursor);
+  return apiFetch(`${ADMIN_BASE}/feedback?${params}`, { baseUrl: "" });
+}
+
+export async function adminMarkFeedbackRead(id: string): Promise<void> {
+  await apiFetch(`${ADMIN_BASE}/feedback/${id}/read`, {
+    baseUrl: "",
+    method: "PATCH",
+  });
+}
+
+// --- Public (no auth) ---
+
+export async function submitWaitlist(
+  email: string,
+  note?: string,
+): Promise<void> {
+  const res = await fetch("/api/public/v1/waitlist", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, note }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error((body as { error?: string }).error ?? `Error ${res.status}`);
+  }
+}
+
+export async function submitFeedback(opts: {
+  content: string;
+  senderEmail?: string;
+  senderName?: string;
+  context?: { page?: string };
+}): Promise<void> {
+  const res = await fetch("/api/public/v1/feedback", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...opts }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error((body as { error?: string }).error ?? `Error ${res.status}`);
+  }
+}
+
+export async function submitAuthFeedback(opts: {
+  content: string;
+  context?: { page?: string; requestId?: string; action?: string };
+}): Promise<void> {
+  await apiFetch("/feedback", {
+    method: "POST",
+    body: JSON.stringify({ type: "contact", ...opts }),
+  });
+}

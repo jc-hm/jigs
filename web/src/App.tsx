@@ -15,6 +15,8 @@ import {
   signOut,
 } from "./lib/auth";
 import { getInvite } from "./lib/api";
+import { LandingPage } from "./components/LandingPage";
+import { FeedbackForm } from "./components/FeedbackForm";
 
 type Page = "fill" | "templates" | "profile";
 type AuthState = "loading" | "authenticated" | "unauthenticated" | "error";
@@ -40,14 +42,13 @@ function parseHash(): { page: Page; subpath: string } {
 
 // Invite-only access model:
 //   ?invite=CODE  → show signup form; capture code for template bootstrapping
-//   ?signup=1     → show signup form (undocumented open-registration backdoor)
-//   (nothing)     → show login form only
-const OPEN_SIGNUP_PARAM = "jigs-open";
+//   ?signup=1     → show signup form directly (bypasses landing page)
+//   (nothing)     → show landing page with sign-in option
 
 function readAndStripUrlParams(): { inviteCode: string | null; showSignup: boolean } {
   const params = new URLSearchParams(window.location.search);
   const inviteCode = params.get("invite");
-  const hasSignup = Boolean(inviteCode || params.get("signup") === OPEN_SIGNUP_PARAM);
+  const hasSignup = Boolean(inviteCode || params.get("signup") === "1");
 
   if (inviteCode) sessionStorage.setItem("jigs:pendingInvite", inviteCode);
 
@@ -65,6 +66,8 @@ function App() {
   const [route, setRoute] = useState(parseHash);
   const { page } = route;
   const [inviteBanner, setInviteBanner] = useState<string | null>(null);
+  const [landingView, setLandingView] = useState<"landing" | "auth">("landing");
+  const [contactOpen, setContactOpen] = useState(false);
 
   // Read URL params once on mount — must run before auth check so the invite
   // code lands in sessionStorage before the user flow proceeds.
@@ -165,6 +168,9 @@ function App() {
   }
 
   if (authState === "unauthenticated") {
+    if (!signupParams.showSignup && landingView === "landing") {
+      return <LandingPage onSignIn={() => setLandingView("auth")} />;
+    }
     return (
       <AuthScreen
         onSignedIn={handleSignedIn}
@@ -232,6 +238,27 @@ function App() {
         )}
         {page === "profile" && <Profile />}
       </main>
+
+      {/* Footer */}
+      <footer className="shrink-0 border-t border-gray-100 bg-white px-4 py-2">
+        <div className="flex items-center">
+          <button
+            onClick={() => setContactOpen((v) => !v)}
+            className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            {contactOpen ? "Close" : "Contact"}
+          </button>
+        </div>
+        {contactOpen && (
+          <div className="py-3 max-w-sm">
+            <FeedbackForm
+              mode="authenticated"
+              page={page}
+              onClose={() => setContactOpen(false)}
+            />
+          </div>
+        )}
+      </footer>
     </div>
   );
 }

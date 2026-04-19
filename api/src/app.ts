@@ -8,6 +8,8 @@ import { templates } from "./routes/templates.js";
 import { billing } from "./routes/billing.js";
 import { invites } from "./routes/invites.js";
 import { admin } from "./routes/admin.js";
+import { publicRoutes } from "./routes/public.js";
+import { feedback } from "./routes/feedback.js";
 import { config } from "./env.js";
 import { log } from "./lib/log.js";
 import type { AppEnv } from "./types.js";
@@ -53,12 +55,16 @@ app.get("/api/invites/:code", async (c) => {
   return c.json({ valid: true, expiresAt: invite.expiresAt });
 });
 
+// --- Public routes (no auth) ---
+app.route("/api/public/v1", publicRoutes);
+
 // --- Protected routes ---
 app.use("/api/*", authMiddleware);
 app.route("/api/v1/fill", fill);
 app.route("/api/v1/templates", templates);
 app.route("/api/v1/billing", billing);
 app.route("/api/v1/invites", invites);
+app.route("/api/v1/feedback", feedback);
 
 // Super admin routes — requires valid Cognito JWT + pinned cognitoId match
 app.use("/api/v1/admin/*", superAdminOnly);

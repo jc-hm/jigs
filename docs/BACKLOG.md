@@ -87,10 +87,18 @@ The goal: the user should be able to say "something weird happened in the templa
 
 Invite-based onboarding (copy inviter's templates on signup) is implemented — see `docs/signup-flow.md`. Remaining items:
 
+- **Invite referral tracking & rewards**: Track which invite codes led to signups (add `claimedBy: userId` and atomic `claimedCount` to `INVITE#` records). Surface in Profile: "your link has been used N times". Foundation for a credit-top-up reward when an invite is claimed — design the reward mechanic before implementing disbursement.
 - **Invite analytics**: track how many users each invite code has been claimed by. Add `claimedCount` (atomic increment) to the `INVITE#` record. Surface in Profile ("your link has been used N times").
 - **Pre-signup Cognito gate**: currently the signup form is hidden by URL param only (client-side). For stronger access control, add a Cognito Pre-Signup Lambda trigger that rejects signups without a valid `custom:invite_code` (unless an admin bypass attribute is set). Hardening step for when the pilot becomes closed beta.
 - **Multi-user orgs**: today each user gets their own org. Invite into a shared org (same template namespace, shared balance). Requires: org membership model in DynamoDB, shared S3 prefix (`{orgId}/templates/` instead of `{userId}/templates/`), role-based access (admin can manage templates, users fill only). Significant architectural change.
 - **Live template sync**: currently invited users get a snapshot at signup. If the inviter updates templates later, invitees don't see the changes. Shared-org model (above) solves this; alternatively, a "sync from inviter" button could re-run the copy on demand.
+
+## Feedback & Contact
+
+The feedback system is implemented (`FEEDBACK#` entity, `POST /api/v1/feedback` + `POST /api/public/v1/feedback`, admin Feedback tab). Remaining items:
+
+- **Thumbs up/down reactions on fill interactions**: Add 👍/👎 buttons to each AI response in the Fill page. Call `POST /api/v1/feedback` with `type: "reaction"`, `rating: "up"|"down"`, and `context: { requestId, action: "fill" }`. Design the reaction UI placement first (inline with copy button? below streamed output?).
+- **GDPR logging cleanup**: `tracked-bedrock.ts` logs `inputPreview` (800 chars) and `outputPreview` (800 chars) of Bedrock content to CloudWatch in prod. `agent.ts` logs `messagePreview` (200 chars). Strip these in prod by gating on `process.env.STAGE !== "prod"`. Staging keeps previews for debugging. Satisfies GDPR Art. 5(1)(c) data minimization.
 
 ## Dev Tooling
 

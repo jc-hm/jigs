@@ -472,6 +472,190 @@ export async function adjustBalance(orgId: string, deltaUsd: number): Promise<vo
   );
 }
 
+// --- Generic rate limiter ---
+
+/**
+ * Atomically increment a counter keyed by `key` and return whether the caller
+ * is within the allowed limit for the given window.
+ *
+ * The key is caller-constructed and can encode any criteria:
+ *   `ip:${ip}:feedback`       IP-scoped per-action limit
+ *   `user:${userId}:export`   per-user per-action limit
+ *   `org:${orgId}:api`        per-org limit
+ *   `email:${email}:waitlist` per-email idempotence gate
+ *
+ * Uses a single atomic UpdateItem (ADD + if_not_exists) so there is no
+ * read-before-write race. DynamoDB TTL auto-deletes the item after the
+ * window expires, resetting the counter for the next window.
+ */
+export async function checkRateLimit(
+  key: string,
+  limit: number,
+  windowSecs: number,
+): Promise<{ allowed: boolean; remaining: number }> {
+  const expiry = Math.floor(Date.now() / 1000) + windowSecs;
+  const res = await db.send(
+    new UpdateCommand({
+      TableName: TABLE_NAME,
+      Key: { PK: `RATELIMIT#${key}`, SK: `RATELIMIT#${key}` },
+      UpdateExpression:
+        "ADD #count :one SET #ttl = if_not_exists(#ttl, :expiry)",
+      ExpressionAttributeNames: { "#count": "count", "#ttl": "TTL" },
+      ExpressionAttributeValues: { ":one": 1, ":expiry": expiry },
+      ReturnValues: "ALL_NEW",
+    }),
+  );
+  const count = (res.Attributes?.count as number) ?? 1;
+  return { allowed: count <= limit, remaining: Math.max(0, limit - count) };
+}
+
+// --- Feedback / contact ---
+
+export type FeedbackType = "contact" | "reaction" | "bug";
+export type FeedbackRating = "up" | "down";
+
+export interface FeedbackContext {
+  page?: string;
+  requestId?: string;
+  action?: string;
+}
+
+export interface FeedbackItem {
+  id: string;
+  type: FeedbackType;
+  createdAt: string;
+  content?: string;
+  rating?: FeedbackRating;
+  context?: FeedbackContext;
+  userId?: string;
+  orgId?: string;
+  senderEmail?: string;
+  senderName?: string;
+  read?: boolean;
+}
+
+export async function putFeedback(item: FeedbackItem): Promise<void> {
+  await db.send(
+    new PutCommand({
+      TableName: TABLE_NAME,
+      Item: {
+        PK: `FEEDBACK#${item.id}`,
+        SK: `FEEDBACK#${item.id}`,
+        GSI2PK: "FEEDBACK",
+        GSI2SK: item.createdAt,
+        type: item.type,
+        createdAt: item.createdAt,
+        ...(item.content !== undefined && { content: item.content }),
+        ...(item.rating !== undefined && { rating: item.rating }),
+        ...(item.context !== undefined && { context: item.context }),
+        ...(item.userId !== undefined && { userId: item.userId }),
+        ...(item.orgId !== undefined && { orgId: item.orgId }),
+        ...(item.senderEmail !== undefined && { senderEmail: item.senderEmail }),
+        ...(item.senderName !== undefined && { senderName: item.senderName }),
+        read: item.read ?? false,
+      },
+    }),
+  );
+}
+
+function itemToFeedback(item: Record<string, unknown>): FeedbackItem {
+  return {
+    id: (item.PK as string).replace("FEEDBACK#", ""),
+    type: item.type as FeedbackType,
+    createdAt: item.createdAt as string,
+    content: item.content as string | undefined,
+    rating: item.rating as FeedbackRating | undefined,
+    context: item.context as FeedbackContext | undefined,
+    userId: item.userId as string | undefined,
+    orgId: item.orgId as string | undefined,
+    senderEmail: item.senderEmail as string | undefined,
+    senderName: item.senderName as string | undefined,
+    read: (item.read as boolean | undefined) ?? false,
+  };
+}
+
+export async function listFeedback(
+  limit: number = 20,
+  cursor?: string,
+): Promise<{ items: FeedbackItem[]; nextCursor?: string }> {
+  const res = await db.send(
+    new QueryCommand({
+      TableName: TABLE_NAME,
+      IndexName: "GSI2",
+      KeyConditionExpression: "GSI2PK = :pk",
+      ExpressionAttributeValues: { ":pk": "FEEDBACK" },
+      ScanIndexForward: false,
+      Limit: limit,
+      ...(cursor && {
+        ExclusiveStartKey: JSON.parse(
+          Buffer.from(cursor, "base64url").toString(),
+        ),
+      }),
+    }),
+  );
+  const items = (res.Items ?? []).map(itemToFeedback);
+  const nextCursor = res.LastEvaluatedKey
+    ? Buffer.from(JSON.stringify(res.LastEvaluatedKey)).toString("base64url")
+    : undefined;
+  return { items, nextCursor };
+}
+
+export async function markFeedbackRead(id: string): Promise<void> {
+  await db.send(
+    new UpdateCommand({
+      TableName: TABLE_NAME,
+      Key: { PK: `FEEDBACK#${id}`, SK: `FEEDBACK#${id}` },
+      UpdateExpression: "SET #read = :t",
+      ExpressionAttributeNames: { "#read": "read" },
+      ExpressionAttributeValues: { ":t": true },
+    }),
+  );
+}
+
+// --- Waitlist ---
+
+export interface WaitlistEntry {
+  email: string;
+  createdAt: string;
+  note?: string;
+}
+
+export async function putWaitlist(
+  email: string,
+  note?: string,
+): Promise<void> {
+  await db.send(
+    new PutCommand({
+      TableName: TABLE_NAME,
+      Item: {
+        PK: `WAITLIST#${email.toLowerCase()}`,
+        SK: "METADATA",
+        email: email.toLowerCase(),
+        createdAt: new Date().toISOString(),
+        ...(note && { note }),
+      },
+      ConditionExpression: "attribute_not_exists(PK)",
+    }),
+  );
+}
+
+export async function listWaitlist(): Promise<WaitlistEntry[]> {
+  const res = await db.send(
+    new ScanCommand({
+      TableName: TABLE_NAME,
+      FilterExpression: "begins_with(PK, :prefix) AND SK = :meta",
+      ExpressionAttributeValues: { ":prefix": "WAITLIST#", ":meta": "METADATA" },
+    }),
+  );
+  return (res.Items ?? [])
+    .map((item) => ({
+      email: item.email as string,
+      createdAt: item.createdAt as string,
+      note: item.note as string | undefined,
+    }))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
 /** Return the invite if it exists and has not expired; null otherwise. */
 export async function getInvite(code: string): Promise<Invite | null> {
   const res = await db.send(

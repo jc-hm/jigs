@@ -43,6 +43,14 @@ export class JigsStack extends cdk.Stack {
       projectionType: dynamodb.ProjectionType.ALL,
     });
 
+    // GSI for date-sorted feedback queries (avoids table scans in admin)
+    table.addGlobalSecondaryIndex({
+      indexName: "GSI2",
+      partitionKey: { name: "GSI2PK", type: dynamodb.AttributeType.STRING },
+      sortKey: { name: "GSI2SK", type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.ALL,
+    });
+
     // --- S3 Bucket for templates ---
     const templateBucket = new s3.Bucket(this, "TemplateBucket", {
       bucketName: `jigs-templates-${stage}-${this.account}`,

@@ -12,6 +12,9 @@ import {
   addBalance,
   adjustBalance,
   setLoggedOutAt,
+  listFeedback,
+  markFeedbackRead,
+  listWaitlist,
 } from "../db/entities.js";
 import { config } from "../env.js";
 import { log } from "../lib/log.js";
@@ -107,6 +110,33 @@ admin.post("/orgs/:orgId/users/:userId/logout", async (c) => {
   });
 
   return c.json({ userId, loggedOut: true });
+});
+
+admin.get("/waitlist", async (c) => {
+  const user = c.get("user");
+  const requestId = c.get("requestId");
+  log.info("admin.waitlist", { requestId, userId: user.userId });
+  const entries = await listWaitlist();
+  return c.json({ entries });
+});
+
+admin.get("/feedback", async (c) => {
+  const user = c.get("user");
+  const requestId = c.get("requestId");
+  const limit = Math.min(parseInt(c.req.query("limit") ?? "20", 10), 100);
+  const cursor = c.req.query("cursor") ?? undefined;
+  log.info("admin.feedback", { requestId, userId: user.userId, limit });
+  const result = await listFeedback(limit, cursor);
+  return c.json(result);
+});
+
+admin.patch("/feedback/:id/read", async (c) => {
+  const user = c.get("user");
+  const requestId = c.get("requestId");
+  const id = c.req.param("id");
+  await markFeedbackRead(id);
+  log.info("admin.feedback.read", { requestId, userId: user.userId, id });
+  return c.json({ ok: true });
 });
 
 export { admin };

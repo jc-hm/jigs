@@ -3,9 +3,15 @@ import {
   adminGetOverview,
   adminTopup,
   adminForceLogout,
+  adminGetWaitlist,
+  adminGetFeedback,
+  adminMarkFeedbackRead,
+  createInvite,
   type AdminOrg,
   type AdminUser,
   type AdminOverview,
+  type AdminWaitlistEntry,
+  type AdminFeedbackItem,
 } from "../lib/api";
 import { signOut } from "../lib/auth";
 
@@ -198,7 +204,159 @@ function UserRow({ org, user, onRefresh }: UserRowProps) {
   );
 }
 
+function WaitlistTab() {
+  const [entries, setEntries] = useState<AdminWaitlistEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [inviteSent, setInviteSent] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    adminGetWaitlist()
+      .then((r) => setEntries(r.entries))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleInvite = async (email: string) => {
+    try {
+      const { code } = await createInvite(false);
+      const link = `${window.location.origin}?invite=${code}`;
+      setInviteSent((prev) => ({ ...prev, [email]: link }));
+    } catch {
+      // silent
+    }
+  };
+
+  if (loading) return <p className="text-sm text-gray-400 py-8 text-center">Loading…</p>;
+  if (entries.length === 0) return <p className="text-sm text-gray-400 py-8 text-center">No waitlist entries yet.</p>;
+
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+      <table className="w-full">
+        <thead>
+          <tr className="border-b border-gray-200 bg-gray-50">
+            <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
+            <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Requested</th>
+            <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Note</th>
+            <th className="px-4 py-2.5 w-32" />
+          </tr>
+        </thead>
+        <tbody>
+          {entries.map((e) => (
+            <tr key={e.email} className="border-b border-gray-100 last:border-0">
+              <td className="px-4 py-3 text-sm text-gray-700">{e.email}</td>
+              <td className="px-4 py-3 text-sm text-gray-400">{formatDate(e.createdAt)}</td>
+              <td className="px-4 py-3 text-sm text-gray-500">{e.note ?? "—"}</td>
+              <td className="px-4 py-3 text-right">
+                {inviteSent[e.email] ? (
+                  <span
+                    className="text-xs text-green-600 cursor-pointer"
+                    title={inviteSent[e.email]}
+                    onClick={() => navigator.clipboard?.writeText(inviteSent[e.email])}
+                  >
+                    Copy link ✓
+                  </span>
+                ) : (
+                  <button
+                    onClick={() => handleInvite(e.email)}
+                    className="px-3 py-1 text-xs rounded-md bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors"
+                  >
+                    Send invite
+                  </button>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function FeedbackTab() {
+  const [items, setItems] = useState<AdminFeedbackItem[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | undefined>();
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  const load = useCallback(async (cursor?: string) => {
+    cursor ? setLoadingMore(true) : setLoading(true);
+    try {
+      const res = await adminGetFeedback(20, cursor);
+      setItems((prev) => (cursor ? [...prev, ...res.items] : res.items));
+      setNextCursor(res.nextCursor);
+    } finally {
+      cursor ? setLoadingMore(false) : setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleMarkRead = async (id: string) => {
+    await adminMarkFeedbackRead(id);
+    setItems((prev) => prev.map((i) => i.id === id ? { ...i, read: true } : i));
+  };
+
+  if (loading) return <p className="text-sm text-gray-400 py-8 text-center">Loading…</p>;
+  if (items.length === 0) return <p className="text-sm text-gray-400 py-8 text-center">No feedback yet.</p>;
+
+  return (
+    <div className="space-y-2">
+      {items.map((item) => {
+        const sender = item.senderEmail ?? item.userId ?? "—";
+        const isOpen = expanded === item.id;
+        return (
+          <div
+            key={item.id}
+            className={`bg-white rounded-lg border ${item.read ? "border-gray-100" : "border-blue-200"} overflow-hidden`}
+          >
+            <div
+              className="px-4 py-3 flex items-center gap-3 cursor-pointer hover:bg-gray-50"
+              onClick={() => setExpanded(isOpen ? null : item.id)}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${item.read ? "bg-gray-200" : "bg-blue-400"}`} />
+              <span className="text-xs font-medium text-gray-500 w-16 shrink-0">{item.type}</span>
+              <span className="text-sm text-gray-700 truncate flex-1">{item.content?.slice(0, 80) ?? (item.rating ? `${item.rating} reaction` : "—")}</span>
+              <span className="text-xs text-gray-400 shrink-0">{sender}</span>
+              <span className="text-xs text-gray-300 shrink-0">{formatDate(item.createdAt)}</span>
+            </div>
+            {isOpen && (
+              <div className="border-t border-gray-100 px-4 py-3 bg-gray-50 space-y-2">
+                {item.content && <p className="text-sm text-gray-700 whitespace-pre-wrap">{item.content}</p>}
+                {item.context && (
+                  <p className="text-xs text-gray-400">
+                    page: {item.context.page ?? "—"}{item.context.requestId ? ` · request: ${item.context.requestId}` : ""}
+                  </p>
+                )}
+                {!item.read && (
+                  <button
+                    onClick={() => handleMarkRead(item.id)}
+                    className="text-xs text-blue-500 hover:text-blue-700 transition-colors"
+                  >
+                    Mark as read
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {nextCursor && (
+        <button
+          onClick={() => load(nextCursor)}
+          disabled={loadingMore}
+          className="w-full py-2 text-sm text-gray-400 hover:text-gray-600 transition-colors"
+        >
+          {loadingMore ? "Loading…" : "Load more"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+type AdminTab = "users" | "waitlist" | "feedback";
+
 export function Admin() {
+  const [tab, setTab] = useState<AdminTab>("users");
   const [overview, setOverview] = useState<AdminOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -270,74 +428,100 @@ export function Admin() {
               </p>
             )}
           </div>
-          <button
-            onClick={load}
-            className="px-3 py-1.5 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-white transition-colors"
-          >
-            Refresh
-          </button>
+          {tab === "users" && (
+            <button
+              onClick={load}
+              className="px-3 py-1.5 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-white transition-colors"
+            >
+              Refresh
+            </button>
+          )}
         </div>
 
-        {/* Summary bar */}
-        <div className="grid grid-cols-3 gap-4 mb-6">
-          <div className="bg-white rounded-lg border border-gray-200 px-4 py-3">
-            <p className="text-xs text-gray-500">Orgs</p>
-            <p className="text-xl font-bold text-gray-800">{aggregate?.orgCount ?? 0}</p>
-          </div>
-          <div className="bg-white rounded-lg border border-gray-200 px-4 py-3">
-            <p className="text-xs text-gray-500">Total balance</p>
-            <p className="text-xl font-bold text-gray-800">
-              {formatUsd(aggregate?.totalBalanceUsd ?? 0)}
-            </p>
-          </div>
-          <div className="bg-white rounded-lg border border-gray-200 px-4 py-3">
-            <p className="text-xs text-gray-500">Total spent</p>
-            <p className="text-xl font-bold text-gray-800">
-              {formatUsd(aggregate?.totalSpentUsd ?? 0)}
-            </p>
-          </div>
+        {/* Tab bar */}
+        <div className="flex gap-1 mb-6 border-b border-gray-200">
+          {(["users", "waitlist", "feedback"] as AdminTab[]).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`px-4 py-2 text-sm font-medium capitalize transition-colors border-b-2 -mb-px ${
+                tab === t
+                  ? "border-blue-600 text-blue-600"
+                  : "border-transparent text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              {t}
+            </button>
+          ))}
         </div>
 
-        {/* Users table */}
-        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-gray-200 bg-gray-50">
-                <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Org
-                </th>
-                <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  User email
-                </th>
-                <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Credit left
-                </th>
-                <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Reports
-                </th>
-                <th className="px-4 py-2.5 w-8" />
-              </tr>
-            </thead>
-            <tbody>
-              {rows.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-sm text-gray-400">
-                    No users yet
-                  </td>
-                </tr>
-              ) : (
-                rows.map(({ org, user }) => (
-                  <UserRow
-                    key={`${org.orgId}-${user.id}`}
-                    org={org}
-                    user={user}
-                    onRefresh={load}
-                  />
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+        {tab === "users" && (
+          <>
+            {/* Summary bar */}
+            <div className="grid grid-cols-3 gap-4 mb-6">
+              <div className="bg-white rounded-lg border border-gray-200 px-4 py-3">
+                <p className="text-xs text-gray-500">Orgs</p>
+                <p className="text-xl font-bold text-gray-800">{aggregate?.orgCount ?? 0}</p>
+              </div>
+              <div className="bg-white rounded-lg border border-gray-200 px-4 py-3">
+                <p className="text-xs text-gray-500">Total balance</p>
+                <p className="text-xl font-bold text-gray-800">
+                  {formatUsd(aggregate?.totalBalanceUsd ?? 0)}
+                </p>
+              </div>
+              <div className="bg-white rounded-lg border border-gray-200 px-4 py-3">
+                <p className="text-xs text-gray-500">Total spent</p>
+                <p className="text-xl font-bold text-gray-800">
+                  {formatUsd(aggregate?.totalSpentUsd ?? 0)}
+                </p>
+              </div>
+            </div>
+
+            {/* Users table */}
+            <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-gray-200 bg-gray-50">
+                    <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Org
+                    </th>
+                    <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      User email
+                    </th>
+                    <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Credit left
+                    </th>
+                    <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Reports
+                    </th>
+                    <th className="px-4 py-2.5 w-8" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-8 text-center text-sm text-gray-400">
+                        No users yet
+                      </td>
+                    </tr>
+                  ) : (
+                    rows.map(({ org, user }) => (
+                      <UserRow
+                        key={`${org.orgId}-${user.id}`}
+                        org={org}
+                        user={user}
+                        onRefresh={load}
+                      />
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+
+        {tab === "waitlist" && <WaitlistTab />}
+        {tab === "feedback" && <FeedbackTab />}
       </div>
     </div>
   );
