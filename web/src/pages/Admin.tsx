@@ -30,6 +30,12 @@ function formatUsd(amount: number): string {
   return `$${amount.toFixed(2)}`;
 }
 
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
+}
+
 interface UserRowProps {
   org: AdminOrg;
   user: AdminUser;
@@ -101,9 +107,43 @@ function UserRow({ org, user, onRefresh }: UserRowProps) {
       </tr>
       {expanded && (
         <tr className="bg-gray-50 border-b border-gray-100">
-          <td colSpan={5} className="px-6 py-3">
+          <td colSpan={5} className="px-6 py-4">
             <div className="text-xs text-gray-500 mb-3">
               Last login: {formatDate(user.lastLoginAt)}
+            </div>
+
+            {/* Balance detail */}
+            <div className="grid grid-cols-3 gap-3 mb-3">
+              <div className="bg-white rounded border border-gray-200 px-3 py-2">
+                <div className="text-xs text-gray-400">Topped up</div>
+                <div className="text-sm font-mono text-gray-700">{formatUsd(org.balance.topUpsUsd)}</div>
+              </div>
+              <div className="bg-white rounded border border-gray-200 px-3 py-2">
+                <div className="text-xs text-gray-400">Spent</div>
+                <div className="text-sm font-mono text-gray-700">{formatUsd(org.balance.spentUsd)}</div>
+              </div>
+              <div className="bg-white rounded border border-gray-200 px-3 py-2">
+                <div className="text-xs text-gray-400">Reports</div>
+                <div className="text-sm font-mono text-gray-700">{org.balance.reportsLifetime}</div>
+              </div>
+            </div>
+
+            {/* Token counters by tier */}
+            <div className="grid grid-cols-2 gap-3 mb-3">
+              <div className="bg-white rounded border border-gray-200 px-3 py-2">
+                <div className="text-xs font-medium text-gray-500 mb-1">Lite (Haiku)</div>
+                <div className="flex gap-4 text-xs text-gray-600">
+                  <span>In: <span className="font-mono">{formatTokens(org.balance.liIn)}</span></span>
+                  <span>Out: <span className="font-mono">{formatTokens(org.balance.liOut)}</span></span>
+                </div>
+              </div>
+              <div className="bg-white rounded border border-gray-200 px-3 py-2">
+                <div className="text-xs font-medium text-gray-500 mb-1">Medium (Sonnet)</div>
+                <div className="flex gap-4 text-xs text-gray-600">
+                  <span>In: <span className="font-mono">{formatTokens(org.balance.mdIn)}</span></span>
+                  <span>Out: <span className="font-mono">{formatTokens(org.balance.mdOut)}</span></span>
+                </div>
+              </div>
             </div>
 
             {error && (

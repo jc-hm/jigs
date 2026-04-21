@@ -259,6 +259,11 @@ export interface OrgBalance {
   topUpsUsd: number;
   spentUsd: number;
   reportsLifetime: number;
+  // Lifetime token counters by model tier (li = lite/haiku, md = medium/sonnet)
+  liIn: number;
+  liOut: number;
+  mdIn: number;
+  mdOut: number;
 }
 
 export async function getOrgBalance(orgId: string): Promise<OrgBalance> {
@@ -273,6 +278,10 @@ export async function getOrgBalance(orgId: string): Promise<OrgBalance> {
     topUpsUsd: res.Item?.topUpsUsd ?? 0,
     spentUsd: res.Item?.spentUsd ?? 0,
     reportsLifetime: res.Item?.reportsLifetime ?? 0,
+    liIn: res.Item?.liIn ?? 0,
+    liOut: res.Item?.liOut ?? 0,
+    mdIn: res.Item?.mdIn ?? 0,
+    mdOut: res.Item?.mdOut ?? 0,
   };
 }
 
@@ -304,24 +313,42 @@ export async function addBalance(orgId: string, amountUsd: number): Promise<void
  * The balance is allowed to drift slightly negative (one call's worth)
  * since the pre-call check is only `balance > 0`.
  */
+export interface TokenDelta {
+  tier: "li" | "md";
+  in: number;
+  out: number;
+}
+
 export async function deductBalance(
   orgId: string,
   amountUsd: number,
   reportDelta: number = 0,
+  tokens?: TokenDelta,
 ): Promise<void> {
   if (amountUsd < 0) throw new Error("deductBalance amount must be non-negative");
-  if (amountUsd === 0 && reportDelta === 0) return;
+  if (amountUsd === 0 && reportDelta === 0 && !tokens) return;
+
+  let updateExpr = "ADD balanceUsd :neg, spentUsd :pos, reportsLifetime :rep";
+  const exprValues: Record<string, number> = {
+    ":neg": -amountUsd,
+    ":pos": amountUsd,
+    ":rep": reportDelta,
+  };
+
+  if (tokens) {
+    const inField = `${tokens.tier}In`;
+    const outField = `${tokens.tier}Out`;
+    updateExpr += `, ${inField} :tokIn, ${outField} :tokOut`;
+    exprValues[":tokIn"] = tokens.in;
+    exprValues[":tokOut"] = tokens.out;
+  }
+
   await db.send(
     new UpdateCommand({
       TableName: TABLE_NAME,
       Key: { PK: `ORG#${orgId}`, SK: "BALANCE" },
-      UpdateExpression:
-        "ADD balanceUsd :neg, spentUsd :pos, reportsLifetime :rep",
-      ExpressionAttributeValues: {
-        ":neg": -amountUsd,
-        ":pos": amountUsd,
-        ":rep": reportDelta,
-      },
+      UpdateExpression: updateExpr,
+      ExpressionAttributeValues: exprValues,
     })
   );
 }

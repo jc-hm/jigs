@@ -12,15 +12,19 @@ import { config } from "../../env.js";
 import {
   assertBalance,
   trackAndDeduct,
+  calculateCost,
+  modelTier,
   InsufficientBalanceError,
 } from "./tracker.js";
 import type { UsageAction } from "./tracker.js";
+import { putUsageEvent } from "./usage-events.js";
 import { log, preview } from "../../lib/log.js";
 
 export interface CallContext {
   userId: string;
   orgId: string;
   requestId: string;
+  surface: "fill" | "templates";
 }
 
 export interface CallMeta {
@@ -294,13 +298,29 @@ export class TrackedBedrock {
     });
 
     if (input.modelId) {
+      const inTok  = usage?.inputTokens ?? 0;
+      const outTok = usage?.outputTokens ?? 0;
       try {
-        await trackAndDeduct({
+        const costUsd = await trackAndDeduct({
           orgId: this.ctx.orgId,
           action: meta.action,
           modelId: input.modelId,
-          inputTokens: usage?.inputTokens ?? 0,
-          outputTokens: usage?.outputTokens ?? 0,
+          inputTokens: inTok,
+          outputTokens: outTok,
+        });
+        putUsageEvent({
+          ts: start,
+          req_id: this.ctx.requestId,
+          org_id: this.ctx.orgId,
+          user_id: this.ctx.userId,
+          model_id: input.modelId,
+          model_tier: modelTier(input.modelId),
+          action: meta.action,
+          surface: this.ctx.surface,
+          in_tok: inTok,
+          out_tok: outTok,
+          cost_usd: costUsd,
+          lat_ms: Date.now() - start,
         });
       } catch (err) {
         log.error("bedrock.track.failed", err, {
@@ -403,12 +423,26 @@ export class TrackedBedrock {
 
     if (shouldTrack) {
       try {
-        await trackAndDeduct({
+        const costUsd = await trackAndDeduct({
           orgId: this.ctx.orgId,
           action: meta.action,
           modelId: input.modelId!,
           inputTokens,
           outputTokens,
+        });
+        putUsageEvent({
+          ts: start,
+          req_id: this.ctx.requestId,
+          org_id: this.ctx.orgId,
+          user_id: this.ctx.userId,
+          model_id: input.modelId!,
+          model_tier: modelTier(input.modelId!),
+          action: meta.action,
+          surface: this.ctx.surface,
+          in_tok: inputTokens,
+          out_tok: outputTokens,
+          cost_usd: costUsd,
+          lat_ms: Date.now() - start,
         });
       } catch (err) {
         log.error("bedrock.track.failed", err, {

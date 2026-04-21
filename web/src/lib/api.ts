@@ -307,6 +307,10 @@ export interface AdminOrg {
     topUpsUsd: number;
     spentUsd: number;
     reportsLifetime: number;
+    liIn: number;
+    liOut: number;
+    mdIn: number;
+    mdOut: number;
   };
   users: AdminUser[];
 }

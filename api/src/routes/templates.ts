@@ -123,7 +123,7 @@ templates.post("/agent", async (c) => {
     // needed because the agent loop awaits converse() which awaits this
     // callback — JS single-threaded means writes can't interleave.
     const tracker = new TrackedBedrock(
-      { userId: user.userId, orgId: user.orgId, requestId },
+      { userId: user.userId, orgId: user.orgId, requestId, surface: "templates" },
       {
         onRetry: async (info) => {
           await writeEvent(s, {

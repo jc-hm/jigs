@@ -38,6 +38,7 @@ fill.post("/", async (c) => {
     userId: user.userId,
     orgId: user.orgId,
     requestId,
+    surface: "fill",
   });
 
   const aiRouter = await getAIRouter(tracker);

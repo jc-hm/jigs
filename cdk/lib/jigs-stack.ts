@@ -7,10 +7,16 @@ import * as cloudfront from "aws-cdk-lib/aws-cloudfront";
 import * as origins from "aws-cdk-lib/aws-cloudfront-origins";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as s3deploy from "aws-cdk-lib/aws-s3-deployment";
+import * as glue from "aws-cdk-lib/aws-glue";
 import { Construct } from "constructs";
 
 interface JigsStackProps extends cdk.StackProps {
   stage: string;
+  // System cross-region inference profile IDs (AWS-managed, not customer-created).
+  // These are the only supported invocation path for Haiku 4.5 and Sonnet 4.6 —
+  // direct on-demand invocation is not available for these model generations.
+  // For prod (eu-central-1): eu.* profiles route within the EU cluster only (GDPR-safe).
+  // For staging (us-west-2): us.* profiles route within the US cluster.
   bedrockModelSonnet: string;
   bedrockModelHaiku: string;
   superAdminCognitoId: string;
@@ -49,6 +55,82 @@ export class JigsStack extends cdk.Stack {
       partitionKey: { name: "GSI2PK", type: dynamodb.AttributeType.STRING },
       sortKey: { name: "GSI2SK", type: dynamodb.AttributeType.STRING },
       projectionType: dynamodb.ProjectionType.ALL,
+    });
+
+    // --- S3 Bucket for usage events (Athena analytics) ---
+    const usageBucket = new s3.Bucket(this, "UsageBucket", {
+      bucketName: `jigs-usage-${stage}-${this.account}`,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      removalPolicy:
+        stage === "prod"
+          ? cdk.RemovalPolicy.RETAIN
+          : cdk.RemovalPolicy.DESTROY,
+      autoDeleteObjects: stage !== "prod",
+    });
+
+    // --- Glue Database + Table for Athena ---
+    const glueDb = new glue.CfnDatabase(this, "GlueDatabase", {
+      catalogId: this.account,
+      databaseInput: { name: `jigs_${stage}` },
+    });
+
+    new glue.CfnTable(this, "ModelUsageTable", {
+      catalogId: this.account,
+      databaseName: `jigs_${stage}`,
+      tableInput: {
+        name: "model_usage",
+        tableType: "EXTERNAL_TABLE",
+        parameters: {
+          // Partition projection: Athena resolves partitions from the path
+          // pattern without needing MSCK REPAIR TABLE on every new day.
+          "projection.enabled": "true",
+          // org_id is injected at query time — caller must supply
+          // WHERE org_id = '...' to prune; omitting scans all orgs.
+          "projection.org_id.type": "injected",
+          "projection.year.type":   "integer",
+          "projection.year.range":  "2026,2035",
+          "projection.month.type":  "integer",
+          "projection.month.range": "1,12",
+          "projection.month.digits": "2",
+          "projection.day.type":    "integer",
+          "projection.day.range":   "1,31",
+          "projection.day.digits":  "2",
+          "storage.location.template":
+            `s3://${usageBucket.bucketName}/events/model_usage/org_id=\${org_id}/year=\${year}/month=\${month}/day=\${day}`,
+          "classification": "json",
+          "compressionType": "gzip",
+        },
+        storageDescriptor: {
+          location: `s3://${usageBucket.bucketName}/events/model_usage/`,
+          inputFormat:  "org.apache.hadoop.mapred.TextInputFormat",
+          outputFormat: "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat",
+          compressed: true,
+          serdeInfo: {
+            serializationLibrary: "org.openx.data.jsonserde.JsonSerDe",
+            parameters: { "ignore.malformed.json": "TRUE" },
+          },
+          columns: [
+            { name: "ts",         type: "bigint"  },
+            { name: "req_id",     type: "string"  },
+            { name: "user_id",    type: "string"  },
+            { name: "model_id",   type: "string"  },
+            { name: "model_tier", type: "string"  },
+            { name: "action",     type: "string"  },
+            { name: "surface",    type: "string"  },
+            { name: "in_tok",     type: "bigint"  },
+            { name: "out_tok",    type: "bigint"  },
+            { name: "cost_usd",   type: "double"  },
+            { name: "lat_ms",     type: "bigint"  },
+          ],
+        },
+        partitionKeys: [
+          { name: "org_id", type: "string" },
+          { name: "year",   type: "int"    },
+          { name: "month",  type: "int"    },
+          { name: "day",    type: "int"    },
+        ],
+      },
     });
 
     // --- S3 Bucket for templates ---
@@ -147,6 +229,7 @@ export class JigsStack extends cdk.Stack {
         BEDROCK_MODEL_SONNET: bedrockModelSonnet,
         BEDROCK_MODEL_HAIKU: bedrockModelHaiku,
         SUPER_ADMIN_COGNITO_ID: superAdminCognitoId,
+        USAGE_BUCKET: usageBucket.bucketName,
       },
     });
 
@@ -164,6 +247,7 @@ export class JigsStack extends cdk.Stack {
     // Grant Lambda access to DynamoDB, S3, and Bedrock
     table.grantReadWriteData(apiFunction);
     templateBucket.grantReadWrite(apiFunction);
+    usageBucket.grantWrite(apiFunction);
 
     apiFunction.addToRolePolicy(
       new iam.PolicyStatement({

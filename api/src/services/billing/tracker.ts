@@ -1,11 +1,14 @@
 import { deductBalance, getOrgBalance } from "../../db/entities.js";
 
 export type UsageAction = "router" | "fill" | "refine" | "agent_round";
+export type ModelTier = "li" | "md";
 
-// Bedrock list-price per million tokens (USD). These are our underlying costs.
-const MODEL_PRICING: Record<string, { input: number; output: number }> = {
-  "anthropic.claude-haiku-4-5-20251001": { input: 0.8, output: 4.0 },
-  "anthropic.claude-sonnet-4-20250514": { input: 3.0, output: 15.0 },
+// Bedrock list-price per million tokens (USD). Update here when AWS changes
+// prices — a deploy picks up the change automatically.
+const MODEL_PRICING: Record<string, { input: number; output: number; tier: ModelTier }> = {
+  "anthropic.claude-haiku-4-5-20251001": { input: 0.8,  output: 4.0,  tier: "li" },
+  "anthropic.claude-sonnet-4-20250514":  { input: 3.0,  output: 15.0, tier: "md" },
+  "anthropic.claude-sonnet-4-6":         { input: 3.0,  output: 15.0, tier: "md" },
 };
 
 /**
@@ -15,18 +18,22 @@ const MODEL_PRICING: Record<string, { input: number; output: number }> = {
  */
 export const SPREAD = 1.0;
 
+function normalizeModelId(modelId: string): string {
+  return modelId
+    .replace(/^[a-z]{2}\./, "") // strip "us.", "eu." cross-region prefix
+    .replace(/-v\d+:\d+$/, ""); // strip "-v1:0" version suffix
+}
+
+export function modelTier(modelId: string): ModelTier {
+  return MODEL_PRICING[normalizeModelId(modelId)]?.tier ?? "md";
+}
+
 export function calculateCost(
   modelId: string,
   inputTokens: number,
   outputTokens: number,
 ): number {
-  // Model IDs from Bedrock include a region inference prefix
-  // (e.g. "us.anthropic.claude-haiku-4-5-20251001-v1:0"). Strip the prefix
-  // and version suffix so the lookup matches the pricing table.
-  const normalized = modelId
-    .replace(/^[a-z]{2}\./, "") // strip "us.", "eu." etc.
-    .replace(/-v\d+:\d+$/, ""); // strip "-v1:0"
-  const pricing = MODEL_PRICING[normalized];
+  const pricing = MODEL_PRICING[normalizeModelId(modelId)];
   if (!pricing) return 0;
   return (
     (inputTokens * pricing.input) / 1_000_000 +
@@ -61,15 +68,21 @@ export interface TrackedCall {
 }
 
 /**
- * Deducts the AI cost of a Bedrock call from the org balance.
- * Does NOT touch the report counter — that is the caller's responsibility
- * (see `incrementReportCount`). Called from TrackedBedrock after each call.
+ * Deducts the AI cost of a Bedrock call from the org balance and updates
+ * per-tier token counters on the BALANCE row. Returns the charged cost so
+ * the caller can include it in the async usage event without recalculating.
  *
  * Failures must not block the API response — the wrapper swallows and logs.
  */
-export async function trackAndDeduct(call: TrackedCall): Promise<void> {
+export async function trackAndDeduct(call: TrackedCall): Promise<number> {
   const chargedCost = calculateCost(call.modelId, call.inputTokens, call.outputTokens) * SPREAD;
-  await deductBalance(call.orgId, chargedCost, 0);
+  const tier = modelTier(call.modelId);
+  await deductBalance(call.orgId, chargedCost, 0, {
+    tier,
+    in: call.inputTokens,
+    out: call.outputTokens,
+  });
+  return chargedCost;
 }
 
 /**
