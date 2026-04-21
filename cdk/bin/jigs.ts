@@ -1,6 +1,12 @@
 import * as cdk from "aws-cdk-lib";
 import { JigsStack } from "../lib/jigs-stack";
 
+// Sentry DSN is shared across stages — the same project, distinguished by
+// the `environment` tag (staging vs prod). Browser DSNs are intentionally
+// public; Lambda DSN is kept here alongside other non-secret config.
+const SENTRY_DSN =
+  "https://69b42f4f1b805a644c2d1f42e3ccf3e2@o4511256560926720.ingest.de.sentry.io/4511256573116496";
+
 interface StageConfig {
   region: string;
   // System cross-region inference profile IDs. These route within the
@@ -41,6 +47,7 @@ if (!stageConfig) {
 new JigsStack(app, `Jigs-${stage}`, {
   stage,
   ...stageConfig,
+  sentryDsn: SENTRY_DSN,
   env: {
     account: process.env.CDK_DEFAULT_ACCOUNT,
     region: stageConfig.region,

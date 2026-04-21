@@ -12,6 +12,7 @@ import { publicRoutes } from "./routes/public.js";
 import { feedback } from "./routes/feedback.js";
 import { config } from "./env.js";
 import { log } from "./lib/log.js";
+import { Sentry } from "./lib/sentry.js";
 import type { AppEnv } from "./types.js";
 
 const app = new Hono<AppEnv>();
@@ -101,6 +102,19 @@ app.onError((err, c) => {
     orgId: user?.orgId,
     retryable: isRetryable,
   });
+
+  // Don't clutter Sentry with expected Bedrock throttling — those are
+  // retried automatically and only surface here when exhausted. They're
+  // operational noise, not bugs.
+  if (!isRetryable) {
+    Sentry.withScope((scope) => {
+      if (user?.userId) scope.setUser({ id: user.userId });
+      scope.setTag("orgId", user?.orgId ?? "unknown");
+      scope.setTag("requestId", c.get("requestId") ?? "unknown");
+      scope.setTag("route", `${c.req.method} ${c.req.path}`);
+      Sentry.captureException(err);
+    });
+  }
 
   if (isRetryable) {
     c.header("Retry-After", "5");
