@@ -49,7 +49,7 @@ export function makeBedrockRouter(tracker: TrackedBedrock): AIRouter {
           system: [{ text: systemPrompt }],
           inferenceConfig: {
             maxTokens: 2000,
-            temperature: 0,
+            temperature: 1,
           },
           additionalModelRequestFields: {
             thinking: { type: "enabled", budget_tokens: 1024 },
