@@ -1,5 +1,6 @@
 import type { AIRouter, RouterResult } from "./types.js";
 import type { TrackedBedrock } from "../billing/tracked-bedrock.js";
+import { log } from "../../lib/log.js";
 
 import { config } from "../../env.js";
 const MODEL_ID = config.bedrockModelHaiku;
@@ -32,7 +33,7 @@ Use CLARIFY in two situations:
 1. No template is a good match — ask what kind of document the user wants.
 2. Two or more templates match equally well AND they differ by a specific qualifier or variant that the user has not mentioned — ask which applies.
 
-Only pick NEW_FILL when one template is clearly the best match for what the user described.`;
+When in doubt, prefer CLARIFY over guessing.`;
 }
 
 export function makeBedrockRouter(tracker: TrackedBedrock): AIRouter {
@@ -59,6 +60,14 @@ export function makeBedrockRouter(tracker: TrackedBedrock): AIRouter {
 
       const text =
         response.output?.message?.content?.[0]?.text || '{"intent": "NEW_FILL"}';
+
+      log.info("router.classify", {
+        requestId: tracker.requestId,
+        filenames,
+        systemPrompt,
+        userMessage,
+        rawResponse: text,
+      });
       // Extract JSON from response (model may wrap it in markdown code fences)
       const jsonMatch = text.match(/\{[^}]+\}/);
       if (!jsonMatch) {
