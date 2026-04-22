@@ -39,6 +39,15 @@ Worth designing before implementing. The templates agent already exists and prov
   - Evaluate both for Spanish medical vocabulary accuracy, latency, and cost.
 - **Language switching**: Users should be able to dictate in Spanish while the UI remains in English (or vice versa). The current `recognition.lang = "en-US"` is hardcoded.
 
+## CloudWatch Alarms
+
+Two metric filters + alarms to add in CDK — covers the "paged before users complain" layer that Sentry doesn't:
+
+- **Error rate alarm**: metric filter on `level = "error"` in the Lambda log group → CloudWatch metric → alarm if count > N in a 5-minute window → SNS → email. Catches silent server errors that don't surface as user reports.
+- **Daily AI cost alarm**: metric filter extracting `cost_usd` from `log.bedrock()` lines → CloudWatch metric → alarm if cumulative daily total crosses a threshold (e.g. $5). Guards against a runaway agent loop or unexpected abuse before the bill lands.
+
+Both are ~20 lines of CDK each. Low effort, no new infrastructure.
+
 ## Observability & Debugging
 
 The goal: the user should be able to say "something weird happened in the templates agent a few minutes ago, pull the logs and figure it out" and for that to actually work. Today, CloudWatch has structured logs from the backend but there's no retrieval surface and the frontend doesn't persist anything.
