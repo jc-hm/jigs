@@ -28,7 +28,11 @@ Respond with JSON only.
 - REFINE/RE_SELECT/UPDATE_TMPL: {"intent": "REFINE"}  (templateId optional)
 - CLARIFY: {"intent": "CLARIFY", "message": "Short question for the user — do not mention filenames"}
 
-Use CLARIFY only when genuinely unsure. When in doubt between two similar templates, pick the closest one (NEW_FILL).`;
+Use CLARIFY in two situations:
+1. No template is a good match — ask what kind of document the user wants.
+2. Two or more templates match equally well AND they differ by a specific qualifier or variant that the user has not mentioned — ask which applies.
+
+Only pick NEW_FILL when one template is clearly the best match for what the user described.`;
 }
 
 export function makeBedrockRouter(tracker: TrackedBedrock): AIRouter {
