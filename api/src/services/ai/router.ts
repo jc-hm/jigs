@@ -29,10 +29,7 @@ Respond with JSON only.
 - REFINE/RE_SELECT/UPDATE_TMPL: {"intent": "REFINE"}  (templateId optional)
 - CLARIFY: {"intent": "CLARIFY", "message": "Short question for the user — do not mention filenames"}
 
-Use CLARIFY in two situations:
-1. No template is a good match — ask what kind of document the user wants.
-2. Two or more templates match equally well AND they differ by a specific qualifier or variant that the user has not mentioned — ask which applies.
-
+Use CLARIFY when the best-matching template has qualifiers in its name that the user did not explicitly use in their message. Do not infer unstated qualifiers — ask instead.
 When in doubt, prefer CLARIFY over guessing.`;
 }
 
@@ -51,15 +48,20 @@ export function makeBedrockRouter(tracker: TrackedBedrock): AIRouter {
           messages: [{ role: "user", content: [{ text: userMessage }] }],
           system: [{ text: systemPrompt }],
           inferenceConfig: {
-            maxTokens: 100,
+            maxTokens: 2000,
             temperature: 0,
+          },
+          additionalModelRequestFields: {
+            thinking: { type: "enabled", budget_tokens: 1024 },
           },
         },
         { action: "router" },
       );
 
-      const text =
-        response.output?.message?.content?.[0]?.text || '{"intent": "NEW_FILL"}';
+      // With extended thinking, content[0] is the reasoning block — find the text block explicitly.
+      const content = response.output?.message?.content ?? [];
+      const textBlock = content.find((b) => "text" in b);
+      const text = (textBlock && "text" in textBlock ? textBlock.text : null) ?? '{"intent": "NEW_FILL"}';
 
       log.info("router.classify", {
         requestId: tracker.requestId,
