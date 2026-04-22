@@ -1,3 +1,4 @@
+import { Sentry } from "./lib/sentry.js";
 import { Hono } from "hono";
 import { streamHandle } from "hono/aws-lambda";
 import type { LambdaContext, LambdaEvent } from "hono/aws-lambda";
@@ -63,6 +64,7 @@ async function routingHandler(
     );
     await handlePostConfirmation(ev);
     writeStreamResponse(responseStream, ev);
+    await Sentry.flush(2000);
     return;
   }
 
@@ -71,12 +73,14 @@ async function routingHandler(
     const { runBootstrap } = await import("./services/bootstrap.js");
     await runBootstrap(ev.fromUserId as string, ev.toUserId as string);
     writeStreamResponse(responseStream, { ok: true });
+    await Sentry.flush(2000);
     return;
   }
 
   // Normal HTTP handling — load the full Hono app on first invocation.
   const handler = await getHonoHandler();
-  return handler(event, responseStream, context);
+  await handler(event, responseStream, context);
+  await Sentry.flush(2000);
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

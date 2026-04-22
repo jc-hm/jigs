@@ -20,13 +20,14 @@ interface JigsStackProps extends cdk.StackProps {
   bedrockModelSonnet: string;
   bedrockModelHaiku: string;
   superAdminCognitoId: string;
+  sentryDsn: string;
 }
 
 export class JigsStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: JigsStackProps) {
     super(scope, id, props);
 
-    const { stage, bedrockModelSonnet, bedrockModelHaiku, superAdminCognitoId } = props;
+    const { stage, bedrockModelSonnet, bedrockModelHaiku, superAdminCognitoId, sentryDsn } = props;
 
     // --- DynamoDB Table (single-table design) ---
     const table = new dynamodb.Table(this, "JigsTable", {
@@ -230,6 +231,7 @@ export class JigsStack extends cdk.Stack {
         BEDROCK_MODEL_HAIKU: bedrockModelHaiku,
         SUPER_ADMIN_COGNITO_ID: superAdminCognitoId,
         USAGE_BUCKET: usageBucket.bucketName,
+        SENTRY_DSN: sentryDsn,
       },
     });
 

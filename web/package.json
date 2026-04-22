@@ -10,6 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@sentry/react": "^10.49.0",
     "@tailwindcss/vite": "^4.2.2",
     "amazon-cognito-identity-js": "^6.3.16",
     "i18next": "^26.0.4",
