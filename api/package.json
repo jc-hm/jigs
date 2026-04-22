@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "STAGE=local tsx watch src/local.ts",
     "dev:ollama": "STAGE=local AI_PROVIDER=ollama tsx watch src/local.ts",
-    "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --outdir=dist --format=esm --out-extension:.js=.mjs --external:@aws-sdk/*",
+    "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --outdir=dist --format=esm --out-extension:.js=.mjs --external:@aws-sdk/* \"--banner:js=import { createRequire } from 'node:module'; var require = createRequire(import.meta.url);\"",
     "typecheck": "tsc --noEmit",
     "seed": "STAGE=local tsx src/db/seed.ts",
     "test": "vitest run",
