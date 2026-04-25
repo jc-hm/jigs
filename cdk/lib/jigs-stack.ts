@@ -8,6 +8,9 @@ import * as origins from "aws-cdk-lib/aws-cloudfront-origins";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as s3deploy from "aws-cdk-lib/aws-s3-deployment";
 import * as glue from "aws-cdk-lib/aws-glue";
+import * as acm from "aws-cdk-lib/aws-certificatemanager";
+import * as route53 from "aws-cdk-lib/aws-route53";
+import * as targets from "aws-cdk-lib/aws-route53-targets";
 import { Construct } from "constructs";
 
 interface JigsStackProps extends cdk.StackProps {
@@ -21,13 +24,15 @@ interface JigsStackProps extends cdk.StackProps {
   bedrockModelHaiku: string;
   superAdminCognitoId: string;
   sentryDsn: string;
+  domainName: string;
+  certificate: acm.ICertificate;
 }
 
 export class JigsStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: JigsStackProps) {
     super(scope, id, props);
 
-    const { stage, bedrockModelSonnet, bedrockModelHaiku, superAdminCognitoId, sentryDsn } = props;
+    const { stage, bedrockModelSonnet, bedrockModelHaiku, superAdminCognitoId, sentryDsn, domainName, certificate } = props;
 
     // --- DynamoDB Table (single-table design) ---
     const table = new dynamodb.Table(this, "JigsTable", {
@@ -317,6 +322,8 @@ export class JigsStack extends cdk.Stack {
 
     // --- CloudFront Distribution ---
     const distribution = new cloudfront.Distribution(this, "Distribution", {
+      domainNames: [domainName],
+      certificate,
       defaultBehavior: {
         origin: new origins.S3StaticWebsiteOrigin(webBucket),
         viewerProtocolPolicy:
@@ -345,6 +352,18 @@ export class JigsStack extends cdk.Stack {
       ],
     });
 
+    // --- Route 53 alias record ---
+    const zone = route53.HostedZone.fromHostedZoneAttributes(this, "Zone", {
+      hostedZoneId: "Z00528873B5UC1SJ86NQC",
+      zoneName: "rellena.me",
+    });
+
+    new route53.ARecord(this, "AliasRecord", {
+      zone,
+      recordName: domainName,
+      target: route53.RecordTarget.fromAlias(new targets.CloudFrontTarget(distribution)),
+    });
+
     // --- Deploy SPA to web bucket ---
     new s3deploy.BucketDeployment(this, "WebDeploy", {
       sources: [s3deploy.Source.asset("../web/dist")],
@@ -356,7 +375,7 @@ export class JigsStack extends cdk.Stack {
     // --- Outputs ---
     new cdk.CfnOutput(this, "ApiUrl", { value: functionUrl.url });
     new cdk.CfnOutput(this, "WebUrl", {
-      value: `https://${distribution.distributionDomainName}`,
+      value: `https://${domainName}`,
     });
     new cdk.CfnOutput(this, "UserPoolId", { value: userPool.userPoolId });
     new cdk.CfnOutput(this, "UserPoolClientId", {

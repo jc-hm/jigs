@@ -1,5 +1,6 @@
 import * as cdk from "aws-cdk-lib";
 import { JigsStack } from "../lib/jigs-stack";
+import { CertStack } from "../lib/cert-stack";
 
 // Sentry DSN is shared across stages — the same project, distinguished by
 // the `environment` tag (staging vs prod). Browser DSNs are intentionally
@@ -19,6 +20,7 @@ interface StageConfig {
   //          --query "Users[0].Attributes[?Name=='sub'].Value" --output text
   // Leave empty string to disable admin access (safe default before lookup).
   superAdminCognitoId: string;
+  domainName: string;
 }
 
 const STAGE_CONFIG: Record<string, StageConfig> = {
@@ -27,12 +29,14 @@ const STAGE_CONFIG: Record<string, StageConfig> = {
     bedrockModelSonnet: "us.anthropic.claude-sonnet-4-6",
     bedrockModelHaiku:  "us.anthropic.claude-haiku-4-5-20251001-v1:0",
     superAdminCognitoId: "28611350-6061-703f-75dd-de7784ebc6af",
+    domainName: "staging.rellena.me",
   },
   prod: {
     region: "eu-central-1",
     bedrockModelSonnet: "eu.anthropic.claude-sonnet-4-6",
     bedrockModelHaiku:  "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
     superAdminCognitoId: "c3446892-9071-70b7-ba17-8d3e06251f2e",
+    domainName: "rellena.me",
   },
 };
 
@@ -44,10 +48,22 @@ if (!stageConfig) {
   throw new Error(`Unknown stage "${stage}". Expected: ${Object.keys(STAGE_CONFIG).join(", ")}`);
 }
 
+// CloudFront certs must live in us-east-1. Both stacks opt in to
+// crossRegionReferences so CDK shuttles the cert ARN via SSM automatically.
+const certStack = new CertStack(app, "Jigs-cert", {
+  crossRegionReferences: true,
+  env: {
+    account: process.env.CDK_DEFAULT_ACCOUNT,
+    region: "us-east-1",
+  },
+});
+
 new JigsStack(app, `Jigs-${stage}`, {
   stage,
   ...stageConfig,
   sentryDsn: SENTRY_DSN,
+  certificate: certStack.certificate,
+  crossRegionReferences: true,
   env: {
     account: process.env.CDK_DEFAULT_ACCOUNT,
     region: stageConfig.region,
