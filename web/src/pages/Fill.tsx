@@ -261,9 +261,6 @@ export function Fill() {
           <div className="max-w-3xl mx-auto">
             {!output && !isStreaming && messages.length === 0 && (
               <div className="text-center text-gray-400 mt-20">
-                <h2 className="text-2xl font-semibold text-gray-700 mb-2">
-                  Jigs
-                </h2>
                 <p>{t("fill.emptyHint")}</p>
               </div>
             )}
