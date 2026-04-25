@@ -154,11 +154,12 @@ The signup form is hidden by default. URL params control visibility:
 |---|---|---|
 | (nothing) | No — login only | — |
 | `?invite=CODE` | Yes | Yes (if invite valid + shareTemplates) |
-| `?signup=jigs-open` | Yes | No |
+| `?signup` (any value) | Yes | No |
 
-`jigs-open` is an undocumented but readable param checked client-side. Not a
-security boundary — Cognito self-signup is technically open. This just prevents
-casual discovery of the registration form during the invite-only pilot.
+`signup` is an undocumented param checked client-side (`params.has("signup")`);
+the value is ignored. Not a security boundary — Cognito self-signup is technically
+open. This just prevents casual discovery of the registration form during the
+invite-only pilot.
 
 ---
 

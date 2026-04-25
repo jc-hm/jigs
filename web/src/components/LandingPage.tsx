@@ -98,20 +98,12 @@ export function LandingPage({ onSignIn, onSignUp }: LandingPageProps) {
 
         <div className="mt-8 flex flex-col items-center gap-3 w-full max-w-sm">
           {!inviteOpen && !inviteDone && (
-            <div className="flex items-center gap-4">
-              <button
-                onClick={() => setInviteOpen(true)}
-                className="px-5 py-2.5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                {t("landing.requestInvite")}
-              </button>
-              <button
-                onClick={onSignUp}
-                className="text-sm text-gray-500 hover:text-gray-800 transition-colors"
-              >
-                {t("landing.signUp")}
-              </button>
-            </div>
+            <button
+              onClick={() => setInviteOpen(true)}
+              className="px-5 py-2.5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              {t("landing.requestInvite")}
+            </button>
           )}
 
           {inviteOpen && !inviteDone && (
