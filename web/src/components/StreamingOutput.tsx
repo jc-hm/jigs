@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { OUTPUT_TEXT } from "../lib/styles";
 
 interface StreamingOutputProps {
   text: string;
@@ -88,7 +89,7 @@ export function StreamingOutput({
 
       {/* Content box — separate section below the link row */}
       {showContent && (
-        <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm relative">
+        <div className="bg-white border border-gray-200 rounded-lg p-4 pr-12 relative">
           {canCopy && (
             <button
               type="button"
@@ -129,12 +130,9 @@ export function StreamingOutput({
               )}
             </button>
           )}
-          <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-gray-800">
+          <div className={`${OUTPUT_TEXT}${isStreaming ? " output-streaming" : ""}`}>
             {text}
-            {isStreaming && (
-              <span className="inline-block w-2 h-4 bg-blue-500 animate-pulse ml-0.5" />
-            )}
-          </pre>
+          </div>
         </div>
       )}
     </div>

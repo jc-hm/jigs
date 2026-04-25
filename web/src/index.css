@@ -5,3 +5,18 @@ body {
   font-family: system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
+
+@keyframes output-cursor {
+  50% { opacity: 0.5; }
+}
+
+.output-streaming::after {
+  content: '';
+  display: inline-block;
+  width: 0.5rem;
+  height: 1rem;
+  background-color: #3b82f6;
+  animation: output-cursor 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  vertical-align: text-bottom;
+  margin-left: 2px;
+}

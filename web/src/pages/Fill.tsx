@@ -4,6 +4,7 @@ import { streamFill } from "../lib/api";
 import { StreamingOutput } from "../components/StreamingOutput";
 import { ChatInput } from "../components/ChatInput";
 import { CopyButton } from "../components/CopyButton";
+import { OUTPUT_TEXT } from "../lib/styles";
 import {
   generateSessionId,
   listSessions,
@@ -309,7 +310,7 @@ export function Fill() {
                             className="absolute top-2 right-2 z-10"
                           />
                           <div
-                            className={`bg-white border rounded-lg p-4 pr-12 whitespace-pre-wrap font-mono text-xs ${
+                            className={`bg-white border rounded-lg p-4 pr-12 ${OUTPUT_TEXT} ${
                               pair.assistant.interrupted
                                 ? "border-amber-200"
                                 : "border-gray-200"
