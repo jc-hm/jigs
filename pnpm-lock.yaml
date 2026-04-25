@@ -66,9 +66,15 @@ importers:
         specifier: ^10.4.0
         version: 10.6.0
     devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.17
       aws-cdk:
         specifier: ^2.180.0
         version: 2.1117.0
+      esbuild:
+        specifier: ^0.25.0
+        version: 0.25.12
       tsx:
         specifier: ^4.19.0
         version: 4.21.0

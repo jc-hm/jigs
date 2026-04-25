@@ -1,6 +1,7 @@
 import * as cdk from "aws-cdk-lib";
 import { JigsStack } from "../lib/jigs-stack";
 import { CertStack } from "../lib/cert-stack";
+import { EmailStack } from "../lib/email-stack";
 
 // Sentry DSN is shared across stages — the same project, distinguished by
 // the `environment` tag (staging vs prod). Browser DSNs are intentionally
@@ -55,6 +56,17 @@ const certStack = new CertStack(app, `Jigs-cert-${stage}`, {
   domainName: stageConfig.domainName,
   subjectAlternativeNames: stage === "prod" ? [`*.${stageConfig.domainName}`] : undefined,
   crossRegionReferences: true,
+  env: {
+    account: process.env.CDK_DEFAULT_ACCOUNT,
+    region: "us-east-1",
+  },
+});
+
+// Email stack is stage-independent — one deployment handles both rellena.me
+// (prod) and staging.rellena.me. Deploy once; not gated on --context stage.
+// Only deploy when you actually want to set up / update email infrastructure.
+new EmailStack(app, "Jigs-email", {
+  forwardTo: "chasinglavidainvestments@gmail.com",
   env: {
     account: process.env.CDK_DEFAULT_ACCOUNT,
     region: "us-east-1",
