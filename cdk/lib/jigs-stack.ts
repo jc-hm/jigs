@@ -214,7 +214,7 @@ export class JigsStack extends cdk.Stack {
     // --- Lambda Function for API ---
     const apiFunction = new lambda.Function(this, "ApiFunction", {
       functionName: `jigs-api-${stage}`,
-      runtime: lambda.Runtime.NODEJS_20_X,
+      runtime: lambda.Runtime.NODEJS_22_X,
       handler: "index.handler",
       code: lambda.Code.fromAsset("../api/dist"),
       memorySize: 512,

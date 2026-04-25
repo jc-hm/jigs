@@ -48,9 +48,12 @@ if (!stageConfig) {
   throw new Error(`Unknown stage "${stage}". Expected: ${Object.keys(STAGE_CONFIG).join(", ")}`);
 }
 
-// CloudFront certs must live in us-east-1. Both stacks opt in to
-// crossRegionReferences so CDK shuttles the cert ARN via SSM automatically.
-const certStack = new CertStack(app, "Jigs-cert", {
+// CloudFront certs must live in us-east-1. Each stage gets its own cert stack
+// so staging and prod deploys never share cross-region export writers — a shared
+// stack would stomp each other's ExportsWriter on every alternating deploy.
+const certStack = new CertStack(app, `Jigs-cert-${stage}`, {
+  domainName: stageConfig.domainName,
+  subjectAlternativeNames: stage === "prod" ? [`*.${stageConfig.domainName}`] : undefined,
   crossRegionReferences: true,
   env: {
     account: process.env.CDK_DEFAULT_ACCOUNT,
