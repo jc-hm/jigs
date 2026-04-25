@@ -135,6 +135,9 @@ export class EmailStack extends cdk.Stack {
       architecture: lambda.Architecture.ARM_64,
       timeout: cdk.Duration.seconds(30),
       memorySize: 256,
+      // Cap concurrent executions so a spam burst can't drive up SES send costs.
+      // SES invokes Lambda async so excess invocations are queued/dropped, not errored.
+      reservedConcurrentExecutions: 5,
       environment: {
         BUCKET: emailBucket.bucketName,
         FORWARD_TO: props.forwardTo,

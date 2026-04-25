@@ -4,6 +4,8 @@ import { SendRawEmailCommand, SESClient } from "@aws-sdk/client-ses";
 const s3 = new S3Client({});
 const ses = new SESClient({ region: process.env.AWS_REGION });
 
+type Verdict = { status: "PASS" | "FAIL" | "GRAY" | "PROCESSING_FAILED" };
+
 interface SesEvent {
   Records: Array<{
     ses: {
@@ -13,12 +15,22 @@ interface SesEvent {
         destination: string[];
         commonHeaders: { from?: string[]; subject?: string };
       };
+      receipt: {
+        spamVerdict: Verdict;
+        virusVerdict: Verdict;
+      };
     };
   }>;
 }
 
 export const handler = async (event: SesEvent): Promise<void> => {
-  const { messageId, source, destination, commonHeaders } = event.Records[0].ses.mail;
+  const { mail, receipt } = event.Records[0].ses;
+  const { messageId, source, destination, commonHeaders } = mail;
+
+  // Drop emails that SES flagged as spam or containing viruses.
+  // scanEnabled: true in the receipt rule populates these verdicts.
+  if (receipt.virusVerdict.status === "FAIL") return;
+  if (receipt.spamVerdict.status === "FAIL") return;
   // The address that received the email becomes the From when forwarding,
   // so replies in Gmail go back to original sender via Reply-To.
   const fromAddress = destination[0] ?? process.env.DEFAULT_FROM!;
