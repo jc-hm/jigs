@@ -27,10 +27,18 @@ export const handler = async (event: SesEvent): Promise<void> => {
   const { mail, receipt } = event.Records[0].ses;
   const { messageId, source, destination, commonHeaders } = mail;
 
-  // Drop emails that SES flagged as spam or containing viruses.
-  // scanEnabled: true in the receipt rule populates these verdicts.
-  if (receipt.virusVerdict.status === "FAIL") return;
-  if (receipt.spamVerdict.status === "FAIL") return;
+  // Viruses: drop silently — never forward malware.
+  if (receipt.virusVerdict.status === "FAIL") {
+    console.log(JSON.stringify({ type: "virus_blocked", from: source }));
+    return;
+  }
+
+  // Spam: forward with [SPAM] subject prefix so you can review in Gmail.
+  // Create a Gmail filter (from:-) to auto-archive these if you prefer.
+  const isSpam = receipt.spamVerdict.status === "FAIL";
+  if (isSpam) {
+    console.log(JSON.stringify({ type: "spam_detected", from: source }));
+  }
   // The address that received the email becomes the From when forwarding,
   // so replies in Gmail go back to original sender via Reply-To.
   const fromAddress = destination[0] ?? process.env.DEFAULT_FROM!;
@@ -62,11 +70,15 @@ export const handler = async (event: SesEvent): Promise<void> => {
     .filter((line) => line.trim() !== "")
     .join("\r\n");
 
+  const processedStripped = isSpam
+    ? stripped.replace(/^(Subject:[ \t]*)/im, "$1[SPAM] ")
+    : stripped;
+
   const newHeaders = [
     `From: <${fromAddress}>`,
     `Reply-To: ${replyTo}`,
     `To: ${process.env.FORWARD_TO}`,
-    stripped,
+    processedStripped,
   ]
     .filter(Boolean)
     .join("\r\n");

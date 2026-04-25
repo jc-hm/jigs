@@ -1,11 +1,16 @@
 import * as cdk from "aws-cdk-lib";
+import * as cloudwatch from "aws-cdk-lib/aws-cloudwatch";
+import * as cwActions from "aws-cdk-lib/aws-cloudwatch-actions";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as nodejs from "aws-cdk-lib/aws-lambda-nodejs";
+import * as logs from "aws-cdk-lib/aws-logs";
 import * as route53 from "aws-cdk-lib/aws-route53";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as ses from "aws-cdk-lib/aws-ses";
 import * as sesActions from "aws-cdk-lib/aws-ses-actions";
+import * as sns from "aws-cdk-lib/aws-sns";
+import * as snsSubscriptions from "aws-cdk-lib/aws-sns-subscriptions";
 import { Construct } from "constructs";
 import * as path from "path";
 
@@ -198,6 +203,36 @@ export class EmailStack extends cdk.Stack {
       actions: sharedActions,
       scanEnabled: true,
     });
+
+    // ── Spam alert ───────────────────────────────────────────────────────────
+    // SNS topic → email you when spam volume spikes.
+    // AWS will send a subscription confirmation to forwardTo on first deploy —
+    // click the link in that email to activate the alarm.
+    const spamAlertTopic = new sns.Topic(this, "SpamAlertTopic", {
+      displayName: "Jigs spam alert",
+    });
+    spamAlertTopic.addSubscription(
+      new snsSubscriptions.EmailSubscription(props.forwardTo),
+    );
+
+    // Count "spam_detected" log entries emitted by the forwarder Lambda.
+    const spamMetric = new logs.MetricFilter(this, "SpamMetricFilter", {
+      logGroup: forwarderFn.logGroup,
+      metricNamespace: "Jigs/Email",
+      metricName: "SpamDetected",
+      filterPattern: logs.FilterPattern.stringValue("$.type", "=", "spam_detected"),
+      metricValue: "1",
+      defaultValue: 0,
+    }).metric({ period: cdk.Duration.hours(1), statistic: "Sum" });
+
+    new cloudwatch.Alarm(this, "SpamAlarm", {
+      alarmName: "jigs-email-spam-spike",
+      alarmDescription: "More than 10 spam emails in 1 hour — check S3 incoming/ for false positives",
+      metric: spamMetric,
+      threshold: 10,
+      evaluationPeriods: 1,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    }).addAlarmAction(new cwActions.SnsAction(spamAlertTopic));
 
     // ── IAM user for Gmail "Send as" (SMTP) ───────────────────────────────────
 
