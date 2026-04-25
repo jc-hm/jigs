@@ -114,8 +114,12 @@ export class EmailStack extends cdk.Stack {
       bucketName: `jigs-inbound-email-${this.account}`,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       encryption: s3.BucketEncryption.S3_MANAGED,
-      // Raw emails are only needed until the forwarder Lambda processes them.
-      lifecycleRules: [{ expiration: cdk.Duration.days(7) }],
+      lifecycleRules: [
+        // Legitimate emails: cleaned up quickly after forwarding.
+        { prefix: "incoming/", expiration: cdk.Duration.days(7) },
+        // Spam: kept longer so you can inspect false positives.
+        { prefix: "spam/", expiration: cdk.Duration.days(30) },
+      ],
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       autoDeleteObjects: true,
     });
@@ -154,7 +158,7 @@ export class EmailStack extends cdk.Stack {
       },
     });
 
-    emailBucket.grantRead(forwarderFn);
+    emailBucket.grantReadWrite(forwarderFn);
 
     // Allow SES to invoke the Lambda asynchronously.
     forwarderFn.addPermission("SESInvoke", {

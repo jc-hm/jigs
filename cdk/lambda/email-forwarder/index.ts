@@ -1,4 +1,4 @@
-import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { SendRawEmailCommand, SESClient } from "@aws-sdk/client-ses";
 
 const s3 = new S3Client({});
@@ -33,11 +33,20 @@ export const handler = async (event: SesEvent): Promise<void> => {
     return;
   }
 
-  // Spam: forward with [SPAM] subject prefix so you can review in Gmail.
-  // Create a Gmail filter (from:-) to auto-archive these if you prefer.
-  const isSpam = receipt.spamVerdict.status === "FAIL";
-  if (isSpam) {
+  // Spam: move to spam/ prefix in S3 for manual review, don't forward.
+  // Keeps the domain clean while preserving the email for inspection.
+  if (receipt.spamVerdict.status === "FAIL") {
     console.log(JSON.stringify({ type: "spam_detected", from: source }));
+    await s3.send(new CopyObjectCommand({
+      Bucket: process.env.BUCKET!,
+      CopySource: `${process.env.BUCKET}/incoming/${messageId}`,
+      Key: `spam/${messageId}`,
+    }));
+    await s3.send(new DeleteObjectCommand({
+      Bucket: process.env.BUCKET!,
+      Key: `incoming/${messageId}`,
+    }));
+    return;
   }
   // The address that received the email becomes the From when forwarding,
   // so replies in Gmail go back to original sender via Reply-To.
@@ -70,15 +79,11 @@ export const handler = async (event: SesEvent): Promise<void> => {
     .filter((line) => line.trim() !== "")
     .join("\r\n");
 
-  const processedStripped = isSpam
-    ? stripped.replace(/^(Subject:[ \t]*)/im, "$1[SPAM] ")
-    : stripped;
-
   const newHeaders = [
     `From: <${fromAddress}>`,
     `Reply-To: ${replyTo}`,
     `To: ${process.env.FORWARD_TO}`,
-    processedStripped,
+    stripped,
   ]
     .filter(Boolean)
     .join("\r\n");
