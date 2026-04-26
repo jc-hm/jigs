@@ -134,12 +134,7 @@ function App() {
     setAuthView({ show: true, mode: "signin" });
   }, []);
 
-  const handleGoToSignUp = useCallback(() => {
-    history.pushState({}, "", "?signup");
-    setAuthView({ show: true, mode: "signup" });
-  }, []);
-
-  const handleSignedIn = useCallback(async () => {
+const handleSignedIn = useCallback(async () => {
     // Clean ?signin from URL after successful auth
     history.replaceState({}, "", window.location.pathname + window.location.hash);
     setAuthState("authenticated");
@@ -194,7 +189,7 @@ function App() {
   if (authState === "unauthenticated") {
     const hasInvite = Boolean(inviteParams.inviteCode);
     if (!hasInvite && !authView.show) {
-      return <LandingPage onSignIn={handleGoToSignIn} onSignUp={handleGoToSignUp} />;
+      return <LandingPage onSignIn={handleGoToSignIn} />;
     }
     return (
       <AuthScreen

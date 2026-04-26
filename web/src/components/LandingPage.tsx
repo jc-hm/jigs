@@ -5,7 +5,6 @@ import { ContactModal } from "./ContactModal";
 
 interface LandingPageProps {
   onSignIn: () => void;
-  onSignUp: () => void;
 }
 
 function MicIcon() {
@@ -38,7 +37,7 @@ function ClipboardIcon() {
   );
 }
 
-export function LandingPage({ onSignIn, onSignUp }: LandingPageProps) {
+export function LandingPage({ onSignIn }: LandingPageProps) {
   const { t } = useTranslation();
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
