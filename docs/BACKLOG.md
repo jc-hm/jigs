@@ -2,6 +2,26 @@
 
 Ideas and improvements to address later. Not prioritized — just captured so they don't get lost.
 
+## Separate AWS Accounts for Staging/Prod Isolation
+
+Currently staging (us-west-2) and prod (eu-central-1) share the same AWS account. This creates a fundamental isolation gap: CDK bootstrap roles and the CloudFormation execution role for us-east-1 (where both cert stacks live) are account-wide, so staging credentials can transitively affect prod resources through the CFN exec role regardless of IAM policy scoping.
+
+**The fix:** create a separate AWS account for prod (via AWS Organizations or standalone), and redeploy the prod stack there. CDK already supports this natively — `bin/jigs.ts` sets `env: { account, region }` per stage, so it's a matter of pointing `prod.account` at the new account ID and running `cdk bootstrap` there.
+
+**Benefits:**
+- Staging credentials are account-scoped — structurally impossible to touch prod
+- No IAM policy maintenance as the stack evolves (new services/regions automatically isolated)
+- Separate billing, separate CloudWatch, separate resource limits
+- IAM Identity Center (SSO) makes managing two accounts low-friction
+
+**Migration steps:**
+1. Create a new AWS account (Organization recommended for consolidated billing)
+2. Bootstrap CDK in the new account: `cdk bootstrap aws://NEW_ACCOUNT/eu-central-1` and `aws://NEW_ACCOUNT/us-east-1`
+3. Update `STAGE_CONFIG.prod.account` in `bin/jigs.ts` to the new account ID
+4. Deploy prod stack to the new account (`pnpm deploy:prod`)
+5. Migrate live data (DynamoDB export/import, S3 sync)
+6. Update DNS and cut over
+
 ## Unified Agent Paradigm
 
 The current architecture has two distinct AI surfaces: a narrow intent classifier + filler for the Fill page (4 hard-coded intents: NEW_FILL, REFINE, RE_SELECT, UPDATE_TMPL), and an open tool-use agent for the Templates page. These are separate code paths with separate prompts and separate UIs.
