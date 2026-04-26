@@ -34,6 +34,8 @@ pnpm deploy:staging   # Build api+web, then cdk deploy staging (us-west-2)
 pnpm deploy:prod      # Build api+web, then cdk deploy prod (eu-central-1)
 ```
 
+**Never run staging and prod deploys in parallel.** Both commands synthesize CDK into the same `cdk.out` directory. If they run concurrently, whichever synth finishes last wins and the other deploy fails with "No stacks match the name(s) Jigs-{stage}". Always run them sequentially.
+
 `BucketDeployment` in the stack handles the S3 sync and CloudFront invalidation as part of `cdk deploy` — no manual `aws s3 sync` needed.
 
 For CDK-only operations (diff, bootstrap, destroy), use the filter scripts:
