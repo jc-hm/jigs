@@ -1,12 +1,15 @@
 import * as cdk from "aws-cdk-lib";
 import { JigsStack } from "../lib/jigs-stack";
 import { CertStack } from "../lib/cert-stack";
+import { MonitoringStack } from "../lib/monitoring-stack";
 
 // Sentry DSN is shared across stages — the same project, distinguished by
 // the `environment` tag (staging vs prod). Browser DSNs are intentionally
 // public; Lambda DSN is kept here alongside other non-secret config.
 const SENTRY_DSN =
   "https://69b42f4f1b805a644c2d1f42e3ccf3e2@o4511256560926720.ingest.de.sentry.io/4511256573116496";
+
+const ALERT_EMAIL = "chasinglavidainvestments@gmail.com";
 
 interface StageConfig {
   region: string;
@@ -15,12 +18,14 @@ interface StageConfig {
   // Direct on-demand invocation is not supported for Haiku 4.5 / Sonnet 4.6.
   bedrockModelSonnet: string;
   bedrockModelHaiku: string;
-  // JC's Cognito sub UUID for this stage's pool — gates /api/v1/admin/* routes.
-  // Get via: aws cognito-idp list-users --user-pool-id <id> --filter 'email = "juanqui.hm@gmail.com"'
+  // Cognito sub UUID for the super-admin account — gates /api/v1/admin/* routes.
+  // Get via: aws cognito-idp list-users --user-pool-id <id> --filter 'email = "<admin-email>"'
   //          --query "Users[0].Attributes[?Name=='sub'].Value" --output text
-  // Leave empty string to disable admin access (safe default before lookup).
   superAdminCognitoId: string;
   domainName: string;
+  // CloudFront distribution ID — stable per stage, needed for the us-east-1
+  // monitoring stack (CloudFront metrics only exist there).
+  cfDistributionId: string;
 }
 
 const STAGE_CONFIG: Record<string, StageConfig> = {
@@ -30,6 +35,7 @@ const STAGE_CONFIG: Record<string, StageConfig> = {
     bedrockModelHaiku:  "us.anthropic.claude-haiku-4-5-20251001-v1:0",
     superAdminCognitoId: "28611350-6061-703f-75dd-de7784ebc6af",
     domainName: "staging.rellena.me",
+    cfDistributionId: "E2W53HMVR4JE8R",
   },
   prod: {
     region: "eu-central-1",
@@ -37,6 +43,7 @@ const STAGE_CONFIG: Record<string, StageConfig> = {
     bedrockModelHaiku:  "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
     superAdminCognitoId: "c3446892-9071-70b7-ba17-8d3e06251f2e",
     domainName: "rellena.me",
+    cfDistributionId: "ETPRLZ1VT6U6L",
   },
 };
 
@@ -61,14 +68,27 @@ const certStack = new CertStack(app, `Jigs-cert-${stage}`, {
   },
 });
 
+const { cfDistributionId, ...jigsProps } = stageConfig;
+
 new JigsStack(app, `Jigs-${stage}`, {
   stage,
-  ...stageConfig,
+  ...jigsProps,
   sentryDsn: SENTRY_DSN,
+  alertEmail: ALERT_EMAIL,
   certificate: certStack.certificate,
   crossRegionReferences: true,
   env: {
     account: process.env.CDK_DEFAULT_ACCOUNT,
     region: stageConfig.region,
+  },
+});
+
+new MonitoringStack(app, `Jigs-monitoring-${stage}`, {
+  stage,
+  distributionId: cfDistributionId,
+  alertEmail: ALERT_EMAIL,
+  env: {
+    account: process.env.CDK_DEFAULT_ACCOUNT,
+    region: "us-east-1",
   },
 });

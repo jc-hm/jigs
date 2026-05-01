@@ -11,6 +11,11 @@ import * as glue from "aws-cdk-lib/aws-glue";
 import * as acm from "aws-cdk-lib/aws-certificatemanager";
 import * as route53 from "aws-cdk-lib/aws-route53";
 import * as targets from "aws-cdk-lib/aws-route53-targets";
+import * as logs from "aws-cdk-lib/aws-logs";
+import * as cloudwatch from "aws-cdk-lib/aws-cloudwatch";
+import * as cwactions from "aws-cdk-lib/aws-cloudwatch-actions";
+import * as sns from "aws-cdk-lib/aws-sns";
+import * as snsSubs from "aws-cdk-lib/aws-sns-subscriptions";
 import { Construct } from "constructs";
 
 interface JigsStackProps extends cdk.StackProps {
@@ -24,6 +29,7 @@ interface JigsStackProps extends cdk.StackProps {
   bedrockModelHaiku: string;
   superAdminCognitoId: string;
   sentryDsn: string;
+  alertEmail: string;
   domainName: string;
   certificate: acm.ICertificate;
 }
@@ -32,7 +38,7 @@ export class JigsStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: JigsStackProps) {
     super(scope, id, props);
 
-    const { stage, bedrockModelSonnet, bedrockModelHaiku, superAdminCognitoId, sentryDsn, domainName, certificate } = props;
+    const { stage, bedrockModelSonnet, bedrockModelHaiku, superAdminCognitoId, sentryDsn, alertEmail, domainName, certificate } = props;
 
     // --- DynamoDB Table (single-table design) ---
     const table = new dynamodb.Table(this, "JigsTable", {
@@ -371,6 +377,91 @@ export class JigsStack extends cdk.Stack {
       distribution,
       distributionPaths: ["/*"],
     });
+
+    // --- Monitoring: CloudWatch alarms for Bedrock failures ---
+    //
+    // Three gaps that left 503s invisible:
+    //   1. bedrock.stream.iter_failed — Bedrock errored after streaming started;
+    //      HTTP 200 already committed so onError never fires, Sentry never sees it.
+    //   2. bedrock.retry — throttling leading indicator; multiple retries in a
+    //      short window predicts an imminent 503.
+    //   3. request.unhandled_error (retryable=true) — all retries exhausted,
+    //      503 actually returned. Now also sent to Sentry (see app.ts), but
+    //      a CloudWatch alarm gives independent coverage.
+
+    const alertTopic = new sns.Topic(this, "AlertTopic", {
+      topicName: `jigs-alerts-${stage}`,
+      displayName: `Jigs ${stage} Alerts`,
+    });
+    alertTopic.addSubscription(new snsSubs.EmailSubscription(alertEmail));
+
+    const logGroup = logs.LogGroup.fromLogGroupName(
+      this,
+      "ApiLogGroup",
+      `/aws/lambda/jigs-api-${stage}`,
+    );
+
+    const ns = `Jigs/${stage}`;
+
+    // 1. Mid-stream Bedrock failure (invisible in Sentry/onError)
+    const streamFailedFilter = new logs.MetricFilter(this, "BedrockStreamFailedFilter", {
+      logGroup,
+      metricNamespace: ns,
+      metricName: "BedrockStreamFailed",
+      filterPattern: logs.FilterPattern.literal('{ $.msg = "bedrock.stream.iter_failed" }'),
+      metricValue: "1",
+      defaultValue: 0,
+    });
+    const streamFailedAlarm = new cloudwatch.Alarm(this, "BedrockStreamFailedAlarm", {
+      alarmName: `jigs-${stage}-bedrock-stream-failed`,
+      alarmDescription: "Bedrock errored mid-stream — SSE closed without a done event, user received partial/no output",
+      metric: streamFailedFilter.metric({ statistic: "Sum", period: cdk.Duration.minutes(5) }),
+      threshold: 1,
+      evaluationPeriods: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+    streamFailedAlarm.addAlarmAction(new cwactions.SnsAction(alertTopic));
+
+    // 2. Throttling leading indicator
+    const retryFilter = new logs.MetricFilter(this, "BedrockRetryFilter", {
+      logGroup,
+      metricNamespace: ns,
+      metricName: "BedrockRetry",
+      filterPattern: logs.FilterPattern.literal('{ $.msg = "bedrock.retry" }'),
+      metricValue: "1",
+      defaultValue: 0,
+    });
+    const retryAlarm = new cloudwatch.Alarm(this, "BedrockRetryAlarm", {
+      alarmName: `jigs-${stage}-bedrock-throttling`,
+      alarmDescription: "Bedrock throttling — ≥5 retry attempts in 5 min, risk of user-visible 503s",
+      metric: retryFilter.metric({ statistic: "Sum", period: cdk.Duration.minutes(5) }),
+      threshold: 5,
+      evaluationPeriods: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+    retryAlarm.addAlarmAction(new cwactions.SnsAction(alertTopic));
+
+    // 3. Exhausted retries — 503 actually returned to user
+    const exhaustedFilter = new logs.MetricFilter(this, "BedrockExhaustedFilter", {
+      logGroup,
+      metricNamespace: ns,
+      metricName: "BedrockExhausted",
+      filterPattern: logs.FilterPattern.literal('{ $.msg = "request.unhandled_error" && $.retryable IS TRUE }'),
+      metricValue: "1",
+      defaultValue: 0,
+    });
+    const exhaustedAlarm = new cloudwatch.Alarm(this, "BedrockExhaustedAlarm", {
+      alarmName: `jigs-${stage}-bedrock-exhausted`,
+      alarmDescription: "All Bedrock retries exhausted — 503 returned to user",
+      metric: exhaustedFilter.metric({ statistic: "Sum", period: cdk.Duration.minutes(5) }),
+      threshold: 1,
+      evaluationPeriods: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+    exhaustedAlarm.addAlarmAction(new cwactions.SnsAction(alertTopic));
 
     // --- Outputs ---
     new cdk.CfnOutput(this, "ApiUrl", { value: functionUrl.url });

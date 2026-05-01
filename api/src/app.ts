@@ -103,18 +103,17 @@ app.onError((err, c) => {
     retryable: isRetryable,
   });
 
-  // Don't clutter Sentry with expected Bedrock throttling — those are
-  // retried automatically and only surface here when exhausted. They're
-  // operational noise, not bugs.
-  if (!isRetryable) {
-    Sentry.withScope((scope) => {
-      if (user?.userId) scope.setUser({ id: user.userId });
-      scope.setTag("orgId", user?.orgId ?? "unknown");
-      scope.setTag("requestId", c.get("requestId") ?? "unknown");
-      scope.setTag("route", `${c.req.method} ${c.req.path}`);
-      Sentry.captureException(err);
-    });
-  }
+  // All unhandled errors go to Sentry — retryable or not. Previously
+  // retryable errors (exhausted 503s) were dropped, making user-visible
+  // failures invisible. The error name on the exception already identifies
+  // the cause without needing an extra tag.
+  Sentry.withScope((scope) => {
+    if (user?.userId) scope.setUser({ id: user.userId });
+    scope.setTag("orgId", user?.orgId ?? "unknown");
+    scope.setTag("requestId", c.get("requestId") ?? "unknown");
+    scope.setTag("route", `${c.req.method} ${c.req.path}`);
+    Sentry.captureException(err);
+  });
 
   if (isRetryable) {
     c.header("Retry-After", "5");
