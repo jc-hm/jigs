@@ -5,10 +5,10 @@
   "scripts": {
     "build": "tsc",
     "synth": "cdk synth",
-    "deploy:staging": "cdk deploy Jigs-staging --context stage=staging --require-approval never",
-    "deploy:prod": "cdk deploy Jigs-prod --context stage=prod --require-approval never",
-    "diff:staging": "cdk diff --context stage=staging",
-    "diff:prod": "cdk diff --context stage=prod",
+    "deploy:staging": "cdk deploy Jigs-staging Jigs-monitoring-staging --context stage=staging --require-approval never",
+    "deploy:prod": "cdk deploy Jigs-prod Jigs-monitoring-prod --context stage=prod --require-approval never",
+    "diff:staging": "cdk diff Jigs-staging Jigs-monitoring-staging --context stage=staging",
+    "diff:prod": "cdk diff Jigs-prod Jigs-monitoring-prod --context stage=prod",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
