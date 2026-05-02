@@ -231,7 +231,7 @@ const handleSignedIn = useCallback(async () => {
           onClick={() => setContactOpen(true)}
           className="px-3 py-1.5 rounded-md text-sm text-gray-500 hover:bg-gray-100 transition-colors"
         >
-          Contact
+          {t("contact.title")}
         </button>
         <button
           onClick={handleSignOut}

@@ -10,8 +10,8 @@
     "test:integration": "pnpm --filter api test:integration",
     "test:staging": "pnpm --filter api test:staging",
     "test:prod": "pnpm --filter api test:prod",
-    "deploy:staging": "pnpm --filter api build && pnpm --filter web build && pnpm --filter @jigs/cdk deploy:staging -- --require-approval never",
-    "deploy:prod": "pnpm --filter api build && pnpm --filter web build && pnpm --filter @jigs/cdk deploy:prod -- --require-approval never"
+    "deploy:staging": "git diff --quiet HEAD || (echo 'Deploy blocked: uncommitted changes' >&2 && exit 1) && pnpm --filter api build && pnpm --filter web build && pnpm --filter @jigs/cdk deploy:staging -- --require-approval never && aws ssm put-parameter --name /jigs/staging/deploy-commit --value $(git rev-parse HEAD) --type String --overwrite --region us-west-2",
+    "deploy:prod": "git diff --quiet HEAD || (echo 'Deploy blocked: uncommitted changes' >&2 && exit 1) && pnpm --filter api build && pnpm --filter web build && pnpm --filter @jigs/cdk deploy:prod -- --require-approval never && aws ssm put-parameter --name /jigs/prod/deploy-commit --value $(git rev-parse HEAD) --type String --overwrite --region eu-central-1"
   },
   "engines": {
     "node": ">=20"

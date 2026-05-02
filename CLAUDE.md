@@ -42,6 +42,12 @@ Two-step model tiering:
 
 Session boundaries detected automatically by Haiku. Session state held client-side (no server persistence).
 
+## Deployed versions
+
+Which commit is live per stage is recorded in SSM after each deploy:
+- Staging: `aws ssm get-parameter --name /jigs/staging/deploy-commit --region us-west-2`
+- Prod: `aws ssm get-parameter --name /jigs/prod/deploy-commit --region eu-central-1`
+
 ## Key Commands
 
 ```bash
