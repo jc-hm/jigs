@@ -32,6 +32,7 @@
   "auth.codeResent": "Code resent — check your email.",
 
   "fill.sessions": "Sessions",
+  "fill.sessionsTooltip": "Saved locally in this browser only — not synced to any server or other devices.",
   "fill.newSession": "+ New",
   "fill.noSessions": "No sessions yet",
   "fill.emptyHint": "Describe what goes in the template. Try: \"Monthly status update, shipped the login flow, blocked on API rate limits\"",

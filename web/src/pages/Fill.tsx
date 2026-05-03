@@ -34,9 +34,17 @@ export function Fill() {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  // Load session list on mount
+  // Load session list on mount. Immediately show only sessions within the
+  // last 30 days and capped at 50 — anything excluded is deleted in the
+  // background without blocking render.
   useEffect(() => {
-    listSessions().then(setSessions);
+    listSessions().then((all) => {
+      const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+      const visible = all.filter((s) => s.updatedAt >= cutoff).slice(0, 50);
+      const keep = new Set(visible.map((s) => s.id));
+      setSessions(visible);
+      for (const s of all) if (!keep.has(s.id)) deleteSession(s.id);
+    });
   }, []);
 
   // Auto-scroll the conversation to the bottom as new messages land and as
@@ -201,7 +209,10 @@ export function Fill() {
       {hasHistory && (
         <div className="w-56 border-r border-gray-200 bg-white flex flex-col">
           <div className="p-3 border-b border-gray-200 flex items-center justify-between">
-            <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+            <span
+              className="text-xs font-medium text-gray-500 uppercase tracking-wide cursor-help"
+              title={t("fill.sessionsTooltip")}
+            >
               {t("fill.sessions")}
             </span>
             <button

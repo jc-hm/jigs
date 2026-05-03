@@ -9,7 +9,7 @@
 // Falls back to in-memory storage when OPFS is unavailable (Safari).
 // ---------------------------------------------------------------------------
 
-import { getCurrentUserId } from "./auth";
+import { getAuthenticatedUserId } from "./auth";
 
 export interface SessionMessage {
   role: "user" | "assistant";
@@ -51,7 +51,7 @@ export function isOPFSAvailable(): boolean {
 async function getUserDir(): Promise<FileSystemDirectoryHandle> {
   const root = await navigator.storage.getDirectory();
   const sessions = await root.getDirectoryHandle("sessions", { create: true });
-  const userId = getCurrentUserId();
+  const userId = await getAuthenticatedUserId();
   return sessions.getDirectoryHandle(userId, { create: true });
 }
 

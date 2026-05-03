@@ -201,15 +201,31 @@ export function hasStoredTokens(): boolean {
 // Current user ID (for OPFS isolation)
 // ---------------------------------------------------------------------------
 
-/** Returns a stable user identifier for local storage isolation.
- *  In authenticated mode: Cognito `sub` (UUID) from the ID token.
- *  In local mode: "local". */
+/** Async — awaits getSession() so tokens are rehydrated from localStorage
+ *  after a page reload. Use this for OPFS directory keying.
+ *  getSignInUserSession() (synchronous) returns null until getSession() has
+ *  run, which causes a post-reload fallthrough to "local" and mixes sessions
+ *  across different user accounts. */
+export async function getAuthenticatedUserId(): Promise<string> {
+  const token = await getIdToken();
+  if (!token) return "local";
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1]));
+    return payload.sub || "local";
+  } catch {
+    return "local";
+  }
+}
+
+/** Synchronous — only valid when the in-memory session is already present
+ *  (i.e. after authenticateUser() in the same page session). Safe for
+ *  non-security uses like localStorage key namespacing. Do not use for OPFS
+ *  directory keying; use getAuthenticatedUserId() instead. */
 export function getCurrentUserId(): string {
   const userPool = getUserPool();
   if (!userPool) return "local";
   const user = userPool.getCurrentUser();
   if (!user) return "local";
-  // Decode JWT payload (no verification needed — already verified by getSession)
   const token = user.getSignInUserSession()?.getIdToken().getJwtToken();
   if (!token) return "local";
   try {

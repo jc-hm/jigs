@@ -32,6 +32,7 @@
   "auth.codeResent": "Código reenviado — revisa tu correo.",
 
   "fill.sessions": "Sesiones",
+  "fill.sessionsTooltip": "Guardado solo en este navegador — no se sincroniza con ningún servidor ni otros dispositivos.",
   "fill.newSession": "+ Nuevo",
   "fill.noSessions": "Sin sesiones aún",
   "fill.emptyHint": "Describe qué va en la plantilla. Ejemplo: \"Actualización mensual, entregamos el flujo de inicio de sesión, bloqueados por límites de la API\"",
