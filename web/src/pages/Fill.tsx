@@ -16,6 +16,7 @@ import {
   type SessionMessage,
   type SessionSummary,
 } from "../lib/sessions";
+import { Sentry } from "../lib/sentry";
 
 export function Fill() {
   const { t } = useTranslation();
@@ -183,6 +184,7 @@ export function Fill() {
             },
           ]);
         } else {
+          Sentry.captureException(err);
           setError(
             err instanceof Error ? err.message : t("fill.errorFallback"),
           );

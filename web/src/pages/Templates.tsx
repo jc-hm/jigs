@@ -19,6 +19,7 @@ import {
   streamAgent,
 } from "../lib/api";
 import { ChatInput } from "../components/ChatInput";
+import { Sentry } from "../lib/sentry";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -272,7 +273,8 @@ export function Templates({ initialPath }: TemplatesProps) {
         const { content } = await fileCat(path);
         setEditorContent(content);
         setSavedContent(content);
-      } catch {
+      } catch (err) {
+        Sentry.captureException(err);
         setError(t("tmpl.errorOpen", { path }));
       } finally {
         setIsLoadingFile(false);
@@ -430,7 +432,8 @@ export function Templates({ initialPath }: TemplatesProps) {
     try {
       await fileWrite(selectedPath, editorContent);
       setSavedContent(editorContent);
-    } catch {
+    } catch (err) {
+      Sentry.captureException(err);
       setError(t("tmpl.errorSave"));
     } finally {
       setIsSaving(false);
@@ -459,7 +462,8 @@ export function Templates({ initialPath }: TemplatesProps) {
           setSavedContent("");
         }
         await refreshTree();
-      } catch {
+      } catch (err) {
+        Sentry.captureException(err);
         setError(t("tmpl.errorDelete", { path }));
       }
     },
@@ -479,7 +483,8 @@ export function Templates({ initialPath }: TemplatesProps) {
         await fileMv(oldPath, newPath);
         if (selectedPath === oldPath) setSelectedPath(newPath);
         await refreshTree();
-      } catch {
+      } catch (err) {
+        Sentry.captureException(err);
         setError(t("tmpl.errorRename", { path: oldPath }));
       }
       setRenamingPath(null);
@@ -506,7 +511,8 @@ export function Templates({ initialPath }: TemplatesProps) {
         }
         await refreshTree();
         if (type === "file") await selectFile(fullPath);
-      } catch {
+      } catch (err) {
+        Sentry.captureException(err);
         setError(t("tmpl.errorCreate", { path: fullPath }));
       }
       setInlineInput(null);
@@ -555,7 +561,8 @@ export function Templates({ initialPath }: TemplatesProps) {
         await fileMv(dragSource, newPath);
         if (selectedPath === dragSource) setSelectedPath(newPath);
         await refreshTree();
-      } catch {
+      } catch (err) {
+        Sentry.captureException(err);
         setError(t("tmpl.errorMove", { path: dragSource, dest: targetDir.path }));
       }
       setDragSource(null);
@@ -580,7 +587,8 @@ export function Templates({ initialPath }: TemplatesProps) {
         await fileMv(dragSource, sourceName);
         if (selectedPath === dragSource) setSelectedPath(sourceName);
         await refreshTree();
-      } catch {
+      } catch (err) {
+        Sentry.captureException(err);
         setError(t("tmpl.errorMoveRoot", { path: dragSource }));
       }
       setDragSource(null);
@@ -754,6 +762,7 @@ export function Templates({ initialPath }: TemplatesProps) {
         }
       } catch (err) {
         sawTerminalEvent = true;
+        Sentry.captureException(err);
         const msg =
           err instanceof Error ? err.message : t("tmpl.errorFallback");
         const errorText = toolLines.length

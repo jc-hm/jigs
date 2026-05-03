@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getCurrentUserId } from "../lib/auth";
 
@@ -32,6 +32,10 @@ function getBrowserLocale(): string {
   return match ? match.code : "en-US";
 }
 
+export interface VoiceInputHandle {
+  stop: () => void;
+}
+
 interface VoiceInputProps {
   onTranscript: (text: string) => void;
   disabled?: boolean;
@@ -40,7 +44,8 @@ interface VoiceInputProps {
   inputRef?: React.RefObject<HTMLTextAreaElement | null>;
 }
 
-export function VoiceInput({ onTranscript, disabled, inputRef }: VoiceInputProps) {
+export const VoiceInput = forwardRef<VoiceInputHandle, VoiceInputProps>(
+function VoiceInput({ onTranscript, disabled, inputRef }, ref) {
   const { t } = useTranslation();
   const [isListening, setIsListening] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
@@ -73,6 +78,16 @@ export function VoiceInput({ onTranscript, disabled, inputRef }: VoiceInputProps
   const dot0Ref = useRef<HTMLDivElement>(null);
   const dot1Ref = useRef<HTMLDivElement>(null);
   const dot2Ref = useRef<HTMLDivElement>(null);
+
+  useImperativeHandle(ref, () => ({
+    stop: () => {
+      if (isListening) {
+        recognitionRef.current?.stop();
+        cleanupAudio();
+        setIsListening(false);
+      }
+    },
+  }), [isListening]);
 
   // Enumerate devices on mount (labels may be empty until permission granted)
   useEffect(() => {
@@ -434,4 +449,4 @@ export function VoiceInput({ onTranscript, disabled, inputRef }: VoiceInputProps
       </div>
     </div>
   );
-}
+});

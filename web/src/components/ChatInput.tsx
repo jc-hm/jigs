@@ -1,5 +1,5 @@
 import { useRef, type FormEvent, type KeyboardEvent, type RefObject } from "react";
-import { VoiceInput } from "./VoiceInput";
+import { VoiceInput, type VoiceInputHandle } from "./VoiceInput";
 
 interface ChatInputProps {
   value: string;
@@ -29,18 +29,24 @@ export function ChatInput({
 }: ChatInputProps) {
   const internalRef = useRef<HTMLTextAreaElement>(null);
   const inputRef = (externalRef ?? internalRef) as RefObject<HTMLTextAreaElement | null>;
+  const voiceRef = useRef<VoiceInputHandle>(null);
+
+  const handleSubmit = (e?: FormEvent) => {
+    voiceRef.current?.stop();
+    onSubmit(e);
+  };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      onSubmit();
+      handleSubmit();
     }
   };
 
   const showStop = disabled && !!onStop;
 
   return (
-    <form onSubmit={(e) => { e.preventDefault(); onSubmit(e); }}>
+    <form onSubmit={(e) => { e.preventDefault(); handleSubmit(e); }}>
       <div className="rounded-2xl border border-gray-200 bg-white shadow-sm focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-transparent transition-shadow">
         <textarea
           ref={inputRef}
@@ -54,6 +60,7 @@ export function ChatInput({
         />
         <div className="flex items-center justify-end px-3 pb-2.5 gap-1">
           <VoiceInput
+            ref={voiceRef}
             onTranscript={onChange}
             disabled={disabled}
             inputRef={inputRef}
