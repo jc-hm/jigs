@@ -8,11 +8,42 @@ const API_BASE = "/api/v1";
 // to parse the message string.
 export class ApiError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  /** True when the server says (or the status implies) a retry may succeed. */
+  retryable: boolean;
+  /** Server-suggested minimum wait before retrying, from `Retry-After`. */
+  retryAfterMs?: number;
+  constructor(
+    message: string,
+    status: number,
+    opts: { retryable?: boolean; retryAfterMs?: number } = {},
+  ) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.retryable = opts.retryable ?? false;
+    this.retryAfterMs = opts.retryAfterMs;
   }
+}
+
+/** A stream that closed without its terminal `done` event (mid-stream failure). */
+export class StreamInterruptedError extends Error {
+  constructor() {
+    super("Stream ended before completion");
+    this.name = "StreamInterruptedError";
+  }
+}
+
+const RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
+
+/**
+ * Whether a failed request is worth retrying automatically: transient server
+ * statuses, an explicit `retryable: true` from the API, a dropped connection
+ * (fetch rejects with TypeError), or a stream that died before `done`.
+ */
+export function isRetryableError(err: unknown): boolean {
+  if (err instanceof ApiError) return err.retryable;
+  if (err instanceof StreamInterruptedError) return true;
+  return err instanceof TypeError;
 }
 
 async function authHeaders(): Promise<Record<string, string>> {
@@ -82,7 +113,11 @@ async function* readSSE<T>(res: Response): AsyncGenerator<T> {
   }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || `API error: ${res.status}`);
+    const retryAfterSec = Number(res.headers.get("Retry-After"));
+    throw new ApiError(err.error || `API error: ${res.status}`, res.status, {
+      retryable: err.retryable === true || RETRYABLE_STATUSES.has(res.status),
+      retryAfterMs: retryAfterSec > 0 ? retryAfterSec * 1000 : undefined,
+    });
   }
 
   const reader = res.body?.getReader();
@@ -146,8 +181,9 @@ async function* readSSE<T>(res: Response): AsyncGenerator<T> {
 // --- Stream events (fill endpoint) ---
 
 export interface StreamEvent {
-  type: "meta" | "text" | "done";
+  type: "meta" | "text" | "done" | "error";
   text?: string;
+  error?: string;
   intent?: string;
   templatePath?: string;
   usage?: { inputTokens: number; outputTokens: number; modelId: string };
@@ -169,7 +205,20 @@ export async function* streamFill(
     signal,
   });
 
-  yield* readSSE<StreamEvent>(res);
+  if (res.status === 401) {
+    yield* readSSE<StreamEvent>(res); // signs out + reloads
+    return;
+  }
+
+  // Every fill branch ends with a `done` event, so a stream that closes
+  // without one was cut off server-side after the 200 was committed.
+  let sawDone = false;
+  for await (const event of readSSE<StreamEvent>(res)) {
+    if (event.type === "error") throw new Error(event.error || "Request failed");
+    if (event.type === "done") sawDone = true;
+    yield event;
+  }
+  if (!sawDone) throw new StreamInterruptedError();
 }
 
 // --- File operations (templates endpoint) ---

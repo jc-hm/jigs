@@ -1,6 +1,12 @@
 import { useState, useEffect, useCallback, useRef, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { streamFill } from "../lib/api";
+import {
+  streamFill,
+  ApiError,
+  StreamInterruptedError,
+  isRetryableError,
+} from "../lib/api";
+import { AUTO_RETRY_BASE_MS, autoRetryDelayMs, sleep } from "../lib/retry";
 import { StreamingOutput } from "../components/StreamingOutput";
 import { ChatInput } from "../components/ChatInput";
 import { CopyButton } from "../components/CopyButton";
@@ -29,6 +35,15 @@ export function Fill() {
   const [templatePath, setTemplatePath] = useState<string>();
   const [sessionContext, setSessionContext] = useState<string>();
   const [error, setError] = useState<string>();
+  // Set when a send fails for good, so the Retry button can resend it even
+  // if the user has cleared the restored input.
+  const [failedMessage, setFailedMessage] = useState<string>();
+  // Set while waiting to auto-retry a transient failure.
+  const [retryInfo, setRetryInfo] = useState<{
+    attempt: number;
+    max: number;
+    secondsLeft: number;
+  }>();
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
@@ -95,6 +110,7 @@ export function Fill() {
     setTemplatePath(undefined);
     setSessionContext(undefined);
     setError(undefined);
+    setFailedMessage(undefined);
     saveRef.current = null;
     inputRef.current?.focus();
   }, []);
@@ -127,14 +143,23 @@ export function Fill() {
     [sessionId, handleNewSession]
   );
 
-  const handleSubmit = useCallback(
-    async (e?: FormEvent) => {
-      e?.preventDefault();
-      if (!input.trim() || isStreaming) return;
+  // Localized message for a failed send. Server text for transient errors is
+  // English-only and generic, so we replace it with our own copy.
+  const describeError = useCallback(
+    (err: unknown): string => {
+      if (err instanceof StreamInterruptedError) return t("fill.interrupted");
+      if (err instanceof TypeError) return t("fill.networkError");
+      if (err instanceof ApiError && err.retryable) return t("fill.busyFailed");
+      return err instanceof Error ? err.message : t("fill.errorFallback");
+    },
+    [t],
+  );
 
-      const userMessage = input.trim();
+  const send = useCallback(
+    async (userMessage: string) => {
       setInput("");
       setError(undefined);
+      setFailedMessage(undefined);
       setIsStreaming(true);
       setOutput("");
       setLastIntent(undefined);
@@ -142,61 +167,116 @@ export function Fill() {
       const controller = new AbortController();
       abortRef.current = controller;
       let fullText = "";
+      let waitingToRetry = false;
 
       try {
-        const stream = streamFill(
-          {
-            message: userMessage,
-            sessionContext,
-            conversationHistory: messages,
-          },
-          controller.signal,
-        );
+        for (let attempt = 0; ; attempt++) {
+          fullText = "";
+          try {
+            const stream = streamFill(
+              {
+                message: userMessage,
+                sessionContext,
+                conversationHistory: messages,
+              },
+              controller.signal,
+            );
 
-        for await (const event of stream) {
-          if (event.type === "meta") {
-            setLastIntent(event.intent);
-            if (event.templatePath) {
-              setTemplatePath(event.templatePath);
-              setSessionContext(event.templatePath);
+            for await (const event of stream) {
+              if (event.type === "meta") {
+                setLastIntent(event.intent);
+                if (event.templatePath) {
+                  setTemplatePath(event.templatePath);
+                  setSessionContext(event.templatePath);
+                }
+              } else if (event.type === "text") {
+                fullText += event.text || "";
+                setOutput(fullText);
+              } else if (event.type === "done") {
+                setMessages((prev) => [
+                  ...prev,
+                  { role: "user", text: userMessage },
+                  { role: "assistant", text: fullText },
+                ]);
+              }
             }
-          } else if (event.type === "text") {
-            fullText += event.text || "";
-            setOutput(fullText);
-          } else if (event.type === "done") {
-            setMessages((prev) => [
-              ...prev,
-              { role: "user", text: userMessage },
-              { role: "assistant", text: fullText },
-            ]);
+            break;
+          } catch (err) {
+            // Only retry automatically while nothing has been shown yet —
+            // replaying after partial output would duplicate text.
+            const canRetry =
+              isRetryableError(err) &&
+              !fullText &&
+              attempt < AUTO_RETRY_BASE_MS.length &&
+              !controller.signal.aborted;
+            if (!canRetry) throw err;
+
+            const delay = autoRetryDelayMs(
+              attempt,
+              err instanceof ApiError ? err.retryAfterMs : undefined,
+            );
+            const end = Date.now() + delay;
+            waitingToRetry = true;
+            for (let left = delay; left > 0; left = end - Date.now()) {
+              setRetryInfo({
+                attempt: attempt + 1,
+                max: AUTO_RETRY_BASE_MS.length,
+                secondsLeft: Math.ceil(left / 1000),
+              });
+              await sleep(Math.min(250, left), controller.signal);
+            }
+            waitingToRetry = false;
+            setRetryInfo(undefined);
           }
         }
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") {
-          // User clicked stop — save partial response as interrupted
-          setMessages((prev) => [
-            ...prev,
-            { role: "user", text: userMessage },
-            {
-              role: "assistant",
-              text: fullText || "(Response interrupted)",
-              interrupted: true,
-            },
-          ]);
+          if (waitingToRetry) {
+            // Stopped while waiting to retry: nothing was produced, so give
+            // the message back instead of logging an empty interrupted turn.
+            setInput((prev) => prev || userMessage);
+          } else {
+            // User clicked stop — save partial response as interrupted
+            setMessages((prev) => [
+              ...prev,
+              { role: "user", text: userMessage },
+              {
+                role: "assistant",
+                text: fullText || "(Response interrupted)",
+                interrupted: true,
+              },
+            ]);
+          }
         } else {
           Sentry.captureException(err);
-          setError(
-            err instanceof Error ? err.message : t("fill.errorFallback"),
-          );
+          setError(describeError(err));
+          // Give the message back so nothing has to be retyped.
+          setFailedMessage(userMessage);
+          setInput((prev) => prev || userMessage);
         }
       } finally {
         abortRef.current = null;
         setIsStreaming(false);
+        setRetryInfo(undefined);
         inputRef.current?.focus();
       }
     },
-    [input, isStreaming, sessionContext, messages]
+    [sessionContext, messages, describeError],
   );
+
+  const handleSubmit = useCallback(
+    async (e?: FormEvent) => {
+      e?.preventDefault();
+      if (!input.trim() || isStreaming) return;
+      await send(input.trim());
+    },
+    [input, isStreaming, send],
+  );
+
+  const handleRetry = useCallback(() => {
+    const message = input.trim() || failedMessage;
+    if (message && !isStreaming) send(message);
+  }, [input, failedMessage, isStreaming, send]);
 
   const handleStop = useCallback(() => {
     abortRef.current?.abort();
@@ -367,9 +447,34 @@ export function Fill() {
                 templateName={templatePath}
               />
             )}
+            {retryInfo && (
+              <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-sm">
+                {t("fill.busyRetrying", {
+                  seconds: retryInfo.secondsLeft,
+                  count: retryInfo.attempt,
+                  max: retryInfo.max,
+                })}
+              </div>
+            )}
             {error && (
-              <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
-                {error}
+              <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm flex items-start justify-between gap-3">
+                <div>
+                  <p>{error}</p>
+                  {failedMessage && (
+                    <p className="mt-1 text-xs text-red-600">
+                      {t("fill.retryHint")}
+                    </p>
+                  )}
+                </div>
+                {failedMessage && (
+                  <button
+                    onClick={handleRetry}
+                    disabled={isStreaming}
+                    className="shrink-0 px-3 py-1 rounded-md bg-red-600 text-white text-xs font-medium hover:bg-red-700 disabled:opacity-50"
+                  >
+                    {t("fill.retry")}
+                  </button>
+                )}
               </div>
             )}
             <div ref={chatEndRef} />

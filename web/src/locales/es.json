@@ -40,6 +40,12 @@
   "fill.send": "Enviar",
   "fill.deleteSession": "Eliminar",
   "fill.errorFallback": "Algo salió mal",
+  "fill.busyRetrying": "IA ocupada — reintentando en {{seconds}}s ({{count}}/{{max}})…",
+  "fill.busyFailed": "El servicio de IA está ocupado en este momento. Inténtalo de nuevo en unos instantes.",
+  "fill.networkError": "Problema de conexión. Revisa tu red e inténtalo de nuevo.",
+  "fill.interrupted": "La respuesta se interrumpió antes de terminar.",
+  "fill.retry": "Reintentar",
+  "fill.retryHint": "Tu mensaje está de vuelta en el cuadro, para que lo edites o lo reintentes tal cual.",
   "fill.copyInteraction": "Copiar interacción completa",
   "fill.copyResponse": "Copiar respuesta",
 

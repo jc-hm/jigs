@@ -40,6 +40,12 @@
   "fill.send": "Send",
   "fill.deleteSession": "Delete",
   "fill.errorFallback": "Something went wrong",
+  "fill.busyRetrying": "AI is busy — retrying in {{seconds}}s ({{count}}/{{max}})…",
+  "fill.busyFailed": "The AI service is busy right now. Please try again in a moment.",
+  "fill.networkError": "Connection problem. Check your network and try again.",
+  "fill.interrupted": "The response was interrupted before it finished.",
+  "fill.retry": "Retry",
+  "fill.retryHint": "Your message is back in the box, so you can edit it or retry as is.",
   "fill.copyInteraction": "Copy full interaction",
   "fill.copyResponse": "Copy response",
 
